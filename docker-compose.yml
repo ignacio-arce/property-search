@@ -1,0 +1,10 @@
+services:
+  zonaprop-bot:
+    build: .
+    image: zonaprop-bot:arm64
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+    volumes:
+      - ./data:/data

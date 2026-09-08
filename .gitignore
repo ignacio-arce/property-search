@@ -1,0 +1,15 @@
+# Binaries
+/bin/
+
+# Local runtime state (mounted volume in docker)
+/data/
+
+# Env files (secrets)
+.env
+
+# Nix
+/.direnv/
+/result
+
+# Editor / OS
+.DS_Store
