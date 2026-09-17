@@ -96,36 +96,21 @@ func Load(getenv func(string) string) (*Config, error) {
 	// would reject the correct configuration (token set, no default chat).
 	var err error
 
-	if v := getenv("FETCH_RETRIES"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			return nil, fmt.Errorf("invalid FETCH_RETRIES %q: must be a non-negative integer", v)
-		}
-		cfg.FetchRetries = n
+	if err := intEnv(getenv, "FETCH_RETRIES", 0, &cfg.FetchRetries); err != nil {
+		return nil, err
 	}
 
-	if v := getenv("FETCH_TIMEOUT"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil || d <= 0 {
-			return nil, fmt.Errorf("invalid FETCH_TIMEOUT %q: must be a positive duration", v)
+	for _, d := range []struct {
+		key    string
+		target *time.Duration
+	}{
+		{"FETCH_TIMEOUT", &cfg.FetchTimeout},
+		{"MAX_BROWSER_TIMEOUT", &cfg.MaxBrowserTimeout},
+		{"FETCH_RATE_LIMIT", &cfg.FetchRateLimit},
+	} {
+		if err := durationEnv(getenv, d.key, d.target); err != nil {
+			return nil, err
 		}
-		cfg.FetchTimeout = d
-	}
-
-	if v := getenv("MAX_BROWSER_TIMEOUT"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil || d <= 0 {
-			return nil, fmt.Errorf("invalid MAX_BROWSER_TIMEOUT %q: must be a positive duration", v)
-		}
-		cfg.MaxBrowserTimeout = d
-	}
-
-	if v := getenv("FETCH_RATE_LIMIT"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil || d <= 0 {
-			return nil, fmt.Errorf("invalid FETCH_RATE_LIMIT %q: must be a positive duration", v)
-		}
-		cfg.FetchRateLimit = d
 	}
 
 	if v := getenv("POSTGRES_HOST"); v != "" {
@@ -164,12 +149,8 @@ func Load(getenv func(string) string) (*Config, error) {
 		cfg.RunOnStart = b
 	}
 
-	if v := getenv("MAX_DAILY"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return nil, fmt.Errorf("invalid MAX_DAILY %q: must be a positive integer", v)
-		}
-		cfg.MaxDaily = n
+	if err := intEnv(getenv, "MAX_DAILY", 1, &cfg.MaxDaily); err != nil {
+		return nil, err
 	}
 
 	cfg.SeedChatID = getenv("SEED_CHAT_ID")
@@ -190,6 +171,35 @@ func Load(getenv func(string) string) (*Config, error) {
 // FromEnv loads configuration from the process environment.
 func FromEnv() (*Config, error) {
 	return Load(os.Getenv)
+}
+
+// durationEnv reads a positive duration, leaving the configured default in place
+// when the variable is unset.
+func durationEnv(getenv func(string) string, key string, target *time.Duration) error {
+	v := getenv(key)
+	if v == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return fmt.Errorf("invalid %s %q: must be a positive duration", key, v)
+	}
+	*target = d
+	return nil
+}
+
+// intEnv reads an integer no smaller than min, leaving the default when unset.
+func intEnv(getenv func(string) string, key string, min int, target *int) error {
+	v := getenv(key)
+	if v == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < min {
+		return fmt.Errorf("invalid %s %q: must be an integer >= %d", key, v, min)
+	}
+	*target = n
+	return nil
 }
 
 // parseHour reads "HH:MM" into hour and minute.
