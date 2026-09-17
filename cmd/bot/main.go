@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"zonapropbot/internal/chat"
 	"zonapropbot/internal/config"
 	"zonapropbot/internal/db"
 	"zonapropbot/internal/digest"
@@ -15,6 +18,15 @@ import (
 	"zonapropbot/internal/repo"
 	"zonapropbot/internal/telegram"
 )
+
+// pollerHolder identifies this process for the Telegram poll lease.
+func pollerHolder() string {
+	host, err := os.Hostname()
+	if err != nil {
+		host = "unknown"
+	}
+	return fmt.Sprintf("%s:%d", host, os.Getpid())
+}
 
 // imageDownloader adapts the fetch client to the notifier's image fetcher, so
 // photos go through the same TLS fingerprint and proxy as page fetches.
@@ -79,6 +91,24 @@ func main() {
 			return
 		}
 		logger.Printf("cycle done in %s: %d sent", time.Since(start).Round(time.Millisecond), sent)
+	}
+
+	// The poller runs alongside the digest loop: one consumes updates, the other
+	// produces deliveries. They share the process but not their state.
+	if cfg.TelegramBotToken != "" {
+		poller := &chat.Poller{
+			Repo:   repo.New(pool),
+			API:    nt,
+			Logger: logger,
+			Holder: pollerHolder(),
+		}
+		go func() {
+			if err := poller.Run(ctx); err != nil {
+				logger.Printf("chat: poller stopped: %v", err)
+			}
+		}()
+	} else {
+		logger.Printf("chat: no TELEGRAM_BOT_TOKEN, skipping inbound polling")
 	}
 
 	run()

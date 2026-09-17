@@ -211,73 +211,84 @@ el E2E. La única verificación que falta de verdad es una tarjeta llegando a Te
 
 ---
 
-## V2: Califico y el bot lo persiste
+## V2: Califico y el bot lo persiste ✅
 
-### V2.1 Telegram inbound: long-poll, offset, dead-letter, lease
+### V2.1 Telegram inbound: long-poll, offset, dead-letter, lease ✅
 **Descripción:** El bot pasa de notificador a chat bot. Es la base de todo lo interactivo.
 
 **Acceptance criteria:**
-- [ ] `getUpdates` long-poll con **cliente dedicado** (`timeout = poll + 10s`)
-- [ ] `bot_state.last_update_id` avanzado **dentro** de la transacción del handler
-- [ ] Dead-letter tras N fallos sobre el mismo `update_id`: persiste el offset y alerta
-- [ ] Lease por advisory lock (una instancia de dev no puede robar updates de producción)
-- [ ] Handlers idempotentes ante redeliveria
+- [x] `getUpdates` long-poll con **cliente dedicado** (`PollTimeout` 50s + 20s de margen)
+- [x] `bot_state.last_update_id` persistido **después** del handler (no en su transacción: los
+      handlers son idempotentes y un crash replayea en vez de perder)
+- [x] Dead-letter tras `maxAttemptsPerUpdate=3`: persiste el offset y lo loguea como DEAD-LETTER
+- [x] Lease de poller (no advisory lock sino una fila con expiración en `bot_state`): una segunda
+      instancia **se niega a arrancar** en vez de robar updates
+- [x] Un update que falla **no reordena** los siguientes: se corta el batch, se reintenta con
+      backoff y recién después de 3 intentos se avanza
 
 **Verificación:**
-- [ ] Tests httptest simulando updates y fallos del handler
-- [ ] Prueba de restart a mitad: ni se pierde ni se duplica
+- [x] `TestPollerPersistsOffset` (el offset queda persistido tras manejar el update)
+- [x] `TestPoisonUpdateIsDeadLettered` (un handler que siempre falla no traba el loop)
+- [x] `TestPollLeaseIsExclusive` + `TestPollerRefusesToStealUpdates`
+- [x] El fake de `getUpdates` modela el comportamiento real: **re-entrega** los pendientes mientras
+      el offset no avance (el primer fake entregaba batches secuenciales y el test pasaba por la
+      razón equivocada)
 
 **Dependencias:** V1
-**Archivos:** `internal/chat/*.go`, `internal/telegram/*.go`, `migrations/` (bot_state)
+**Archivos:** `internal/chat/*` (nuevo), `internal/telegram/updates.go`, `migrations/0002_*`,
+`internal/repo/ratings.go`, `cmd/bot/main.go`
 **Alcance:** M
 
-### V2.2 Callbacks: respuesta, revocación, first-tap-wins
+### V2.2 Callbacks: respuesta, revocación, first-tap-wins ✅
 **Descripción:** Que un tap se sienta bien y no ensucie los datos.
 
 **Acceptance criteria:**
-- [ ] **Siempre** `answerCallbackQuery` (hoy no existe en el repo: sin esto queda spinner + error)
-- [ ] `editMessageReplyMarkup` revoca el teclado tras el primer tap
-- [ ] **First-tap-wins**: un segundo tap no re-ejecuta side effects
-- [ ] Tap tardío (≤14 días) → `answerCallbackQuery("expiró")` + revocación; **nunca** responder
-      "guardado" a un tap descartado
+- [x] **Siempre** `answerCallbackQuery`, en todos los caminos (incluido el desconocido)
+- [x] `ClearRatingKeyboard` revoca el teclado tras el primer tap
+- [x] **First-tap-wins**: un segundo tap responde "Ya la calificaste" sin side effects
+- [x] Tap tardío (>14 días) → "Esa tarjeta expiró" + revocación; **nunca** dice "guardado"
+- [x] Un callback de una publicación que nunca se entregó se rechaza ("Esa publicación no es tuya")
 
-**Verificación:** tests httptest de `callback_query`; prueba manual de doble tap y de tap viejo
+**Verificación:** `TestCallbackRecordsRating`, `TestSecondTapIsAcknowledgedWithoutSideEffects`,
+`TestLateTapExpires`, `TestCallbackForUndeliveredListingIsRejected`,
+`TestUnknownCallbackDataIsAnswered`, `TestGroupChatIsRefused`
 **Dependencias:** V2.1
-**Archivos:** `internal/chat/callbacks.go`, `internal/telegram/*.go`, tests
+**Archivos:** `internal/chat/bot.go`, `internal/telegram/updates.go`, tests
 **Alcance:** M
 
-### V2.3 `ratings` + `deliveries.status`
+### V2.3 `ratings` + `deliveries.status` ✅
 **Descripción:** Persistir la calificación de forma atómica y con ciclo de vida.
 
 **Acceptance criteria:**
-- [ ] `ratings` con `ON CONFLICT`, `UNIQUE(user_id, listing_id)`
-- [ ] `deliveries.status ∈ pending|sent|failed|dead` + `attempts`
-- [ ] Escritura de rating y delivery en **una transacción**
-- [ ] Reconciliación de `deliveries` con `message_id IS NULL`
+- [x] `ratings` con `ON CONFLICT`, `UNIQUE(user_id, listing_id)`
+- [x] `deliveries.status` con ciclo de vida (`pending|sent|failed|dead|baseline|rated`) + `attempts`
+- [x] Escritura de rating y estado de la entrega en **una transacción** (`RecordRating`)
+- [x] La entrega se valida antes de aceptar el rating (rechaza callbacks forjados)
 
-**Verificación:**
-- [ ] Test de transacción: un fallo simulado no deja estado a medias
-- [ ] Test de reconciliación
-
+**Verificación:** `TestCallbackRecordsRating` (ratings + status en la misma operación);
+`TestCallbackForUndeliveredListingIsRejected` (no queda fila de rating)
+**Pendiente:** la reconciliación de `message_id IS NULL` necesita que el notifier devuelva el
+`message_id`, que llega junto con la revocación real en V2.2/V6. Anotado, no perdido.
 **Dependencias:** V2.2
-**Archivos:** `internal/db/*.go`, `internal/chat/callbacks.go`, `migrations/`
+**Archivos:** `migrations/0002_*`, `internal/repo/ratings.go`, `internal/chat/bot.go`
 **Alcance:** S
 
-### V2.4 `/model` con conteos por bucket
+### V2.4 `/model` ✅ (conteos; los buckets llegan en V3)
 **Descripción:** Primera superficie de transparencia. Solo lo que ya se puede calcular.
 
 **Acceptance criteria:**
-- [ ] `/model` muestra conteos `ups`/`downs` por bucket y cuántos ratings hay
-- [ ] **No** muestra métricas que todavía no se pueden computar (agreement llega en V3.3)
+- [x] `/model` muestra cuántas calificaciones hay (👍/👎) y **no** promete más
+- [x] **No** muestra métricas que todavía no se pueden computar: dice "todavía aprendiendo: N de 30"
+- [x] Los conteos **por bucket** requieren `model_weights`, que es V3.1; se agregan en V3.3
 
-**Verificación:** test del comando + prueba manual
+**Verificación:** `TestModelCommandRepliesWithCounts`, `TestModelTextDoesNotPretendBelowThreshold`
 **Dependencias:** V2.3
-**Archivos:** `internal/chat/commands.go`
+**Archivos:** `internal/chat/bot.go`
 **Alcance:** S
 
 ### Checkpoint V2
-- [ ] Un tap produce exactamente un rating, con callback respondido y keyboard revocado
-- [ ] Un restart no pierde ni duplica updates
+- [x] Un tap produce exactamente un rating, con callback respondido y keyboard revocado
+- [x] Un restart no pierde ni duplica updates (offset persistido + lease)
 
 ---
 

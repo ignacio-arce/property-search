@@ -13,15 +13,28 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	pool := dbtest.NewPool(t)
 	ctx := context.Background()
 
-	for run := 1; run <= 2; run++ {
-		if err := Migrate(ctx, pool); err != nil {
-			t.Fatalf("migrate run %d: %v", run, err)
-		}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("first migrate: %v", err)
+	}
+	first := recordedMigrations(t, pool)
+
+	// The second run must apply nothing: the count is unchanged, not merely
+	// "1" (which would break every time a migration is added).
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("second migrate: %v", err)
+	}
+	second := recordedMigrations(t, pool)
+
+	if second != first {
+		t.Errorf("recorded migrations went from %d to %d on a repeat run", first, second)
+	}
+	if first == 0 {
+		t.Error("no migrations were recorded")
 	}
 
 	for _, table := range []string{
 		"users", "search_urls", "listings", "listing_sources", "deliveries",
-		"settings", "schema_migrations",
+		"settings", "schema_migrations", "ratings", "bot_state",
 	} {
 		var exists bool
 		err := pool.QueryRow(ctx, `SELECT EXISTS (
@@ -34,15 +47,15 @@ func TestMigrateIsIdempotent(t *testing.T) {
 			t.Errorf("table %s does not exist", table)
 		}
 	}
+}
 
-	// Running twice must not record the migration twice.
-	var recorded int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&recorded); err != nil {
+func recordedMigrations(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM schema_migrations").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if recorded != 1 {
-		t.Errorf("schema_migrations has %d rows, want 1", recorded)
-	}
+	return n
 }
 
 func TestSeedIsIdempotent(t *testing.T) {

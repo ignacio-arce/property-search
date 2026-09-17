@@ -37,15 +37,16 @@ const (
 // Notifier sends listing alerts to a Telegram chat. Without a token it runs in
 // dry-run mode, printing alerts to out instead of the network.
 type Notifier struct {
-	token    string
-	chatID   string // default target when Notify is called with an empty chatID
-	apiBase  string
-	client   *http.Client
-	img      imageFetcher
-	out      io.Writer
-	mu       sync.Mutex
-	lastSent time.Time
-	minDelay time.Duration
+	token      string
+	chatID     string // default target when Notify is called with an empty chatID
+	apiBase    string
+	client     *http.Client
+	pollClient *http.Client
+	img        imageFetcher
+	out        io.Writer
+	mu         sync.Mutex
+	lastSent   time.Time
+	minDelay   time.Duration
 }
 
 // New builds a Notifier. img may be nil (then photos are skipped). out receives
@@ -56,13 +57,16 @@ func New(cfg *config.Config, img imageFetcher, out io.Writer) *Notifier {
 		out = io.Discard
 	}
 	return &Notifier{
-		token:    cfg.TelegramBotToken,
-		chatID:   cfg.TelegramChatID,
-		apiBase:  "https://api.telegram.org",
-		client:   &http.Client{Timeout: 30 * time.Second, Transport: noProxyTransport()},
-		img:      img,
-		out:      out,
-		minDelay: defaultMinSendDelay,
+		token:   cfg.TelegramBotToken,
+		chatID:  cfg.TelegramChatID,
+		apiBase: "https://api.telegram.org",
+		client:  &http.Client{Timeout: 30 * time.Second, Transport: noProxyTransport()},
+		// Long polls block server-side for up to PollTimeout, so this client must
+		// outlive them.
+		pollClient: &http.Client{Timeout: PollTimeout + 20*time.Second, Transport: noProxyTransport()},
+		img:        img,
+		out:        out,
+		minDelay:   defaultMinSendDelay,
 	}
 }
 

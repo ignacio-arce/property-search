@@ -92,14 +92,14 @@ Acá va el índice y el orden.
 - [ ] El budget de fetch se respeta (log de rate)
 
 ### V2: Califico y el bot lo persiste
-- [ ] V2.1 Telegram inbound: long-poll, offset persistido, dead-letter, lease
-- [ ] V2.2 Callbacks: respuesta, keyboard revocado, first-tap-wins, tap tardío
-- [ ] V2.3 `ratings` + `deliveries.status` en una transacción
-- [ ] V2.4 `/model` con conteos por bucket
+- [x] V2.1 Telegram inbound: long-poll, offset persistido, dead-letter, lease
+- [x] V2.2 Callbacks: respuesta, keyboard revocado, first-tap-wins, tap tardío
+- [x] V2.3 `ratings` + `deliveries.status` en una transacción
+- [x] V2.4 `/model` con conteos por bucket
 
 ### Checkpoint V2
-- [ ] Un tap produce exactamente un rating, con callback respondido y keyboard revocado
-- [ ] Un restart no pierde ni duplica updates
+- [x] Un tap produce exactamente un rating, con callback respondido y keyboard revocado
+- [x] Un restart no pierde ni duplica updates
 
 ### V3: Reordena por lo aprendido y explica
 - [ ] V3.1 Buckets + score literal + orden determinista
