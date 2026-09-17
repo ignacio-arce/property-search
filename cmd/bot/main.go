@@ -8,13 +8,16 @@ import (
 	"syscall"
 	"time"
 
-	"zonapropbot/internal/bot"
 	"zonapropbot/internal/config"
+	"zonapropbot/internal/db"
+	"zonapropbot/internal/digest"
 	"zonapropbot/internal/fetch"
-	"zonapropbot/internal/store"
+	"zonapropbot/internal/repo"
 	"zonapropbot/internal/telegram"
 )
 
+// imageDownloader adapts the fetch client to the notifier's image fetcher, so
+// photos go through the same TLS fingerprint and proxy as page fetches.
 type imageDownloader struct {
 	fc *fetch.Client
 }
@@ -33,29 +36,49 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	st, err := store.Open(cfg.DataDir)
-	if err != nil {
-		log.Fatalf("store: %v", err)
-	}
-	defer st.Close()
-
-	fc := fetch.New(cfg)
-	nt := telegram.New(cfg, imageDownloader{fc: fc}, os.Stdout)
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	logger := log.New(os.Stdout, "", log.LstdFlags)
-	logger.Printf("zonaprop-bot: polling %d url(s) every %s (flaresolverr=%s proxy=%s)",
-		len(cfg.SearchURLs), cfg.CheckInterval, onOff(cfg.FlareSolverrURL), onOff(cfg.ZonapropProxy))
+
+	pool, err := db.Open(ctx, cfg.DatabaseURL(), db.Options{Logger: logger})
+	if err != nil {
+		log.Fatalf("db: %v", err)
+	}
+	defer pool.Close()
+
+	if err := db.Migrate(ctx, pool); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+
+	seed := db.SeedInput{ChatID: cfg.SeedChatID}
+	for _, u := range cfg.SeedURLs {
+		seed.URLs = append(seed.URLs, db.SeedURL{Label: u.Label, URL: u.URL})
+	}
+	if err := db.Seed(ctx, pool, seed); err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+
+	fc := fetch.New(cfg)
+	nt := telegram.New(cfg, imageDownloader{fc}, os.Stdout)
+	runner := &digest.Runner{
+		Repo:     repo.New(pool),
+		Fetcher:  fc,
+		Notifier: nt,
+		Logger:   logger,
+	}
+
+	logger.Printf("bot: flaresolverr=%s proxy=%s rate=%s (dry-run=%v)",
+		onOff(cfg.FlareSolverrURL), onOff(cfg.ZonapropProxy), cfg.FetchRateLimit, cfg.TelegramBotToken == "")
 
 	run := func() {
 		start := time.Now()
-		if err := bot.RunOnce(ctx, cfg, fc, nt, st, logger); err != nil {
+		sent, err := runner.RunAll(ctx)
+		if err != nil {
 			logger.Printf("cycle aborted: %v", err)
 			return
 		}
-		logger.Printf("cycle done in %s", time.Since(start).Round(time.Millisecond))
+		logger.Printf("cycle done in %s: %d sent", time.Since(start).Round(time.Millisecond), sent)
 	}
 
 	run()

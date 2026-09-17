@@ -83,7 +83,7 @@ Acá va el índice y el orden.
 - [x] V1.2 Postgres: migrador, seeds y esquema mínimo
 - [x] V1.3 Fetch: `Result{Status,Header}`, FS obligatorio, budget y carril prioritario
 - [x] V1.4 Parser de card tipado sobre fixture real
-- [ ] V1.5 Dedup + baseline silencioso + envío con 👍/👎
+- [x] V1.5 Dedup + baseline silencioso + envío con 👍/👎
 - [ ] V1.6 Verificación E2E (dry-run y Telegram real)
 
 ### Checkpoint V1

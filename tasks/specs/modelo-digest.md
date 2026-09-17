@@ -162,6 +162,8 @@ orden   = ORDER BY score DESC NULLS LAST,
   momento del alta, así que activar/desactivar surte efecto en la corrida siguiente sin tocar datos.
   `users.state='stopped'` (que maneja el propio usuario con `/stop`) y `active=false` (que maneja el
   operador) son **independientes**: el digest requiere `active AND state != 'stopped'`.
+  **Implementado en V1.5** (`repo.ListActiveUsers`), adelantado desde V4.3 para que no exista una
+  ventana sin control; V4.3 queda con el tope diario y el monitoreo de cobertura.
 - AC: input del digest = **todas las publicaciones no entregadas** de las URLs del usuario, no
   "lo fetchado hoy". Auto-sanante: si el bot muere a mitad y reanuda a las 15:00, no se saltea el día.
 - AC: en boot y en cada corrida, terminar cualquier digest no-`done`.

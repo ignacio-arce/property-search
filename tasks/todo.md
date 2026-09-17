@@ -138,33 +138,45 @@ de la sonda (outliers, m² cub. inexistente, dorm constante).
 engañoso: se lo llamaba "DOM real" sin serlo); el probe ahora escribe `probe_capture.html`.
 **Alcance:** M
 
-### V1.5 Dedup + baseline silencioso + envío con botones
+### V1.5 Dedup + baseline silencioso + envío con botones ✅
 **Descripción:** Cierra el camino: candidatas acotadas al usuario, baseline que evita reproducir el
 historial, y envío con teclado inline.
 
 **Acceptance criteria:**
-- [ ] Candidatas = `NOT EXISTS(deliveries)` **y** acotadas por `listing_sources` a las URLs del
-      usuario (sin esto se filtran publicaciones entre usuarios)
-- [ ] Baseline silencioso: al sembrar/validar una URL se insertan `deliveries` de la página 1 **sin
-      enviar**
-- [ ] `Notify(ctx, chatID, listing, opts)` con keyboard 👍/👎 y `callback_data` `u:<id>` / `d:<id>`
-- [ ] Caption presupuestado en **UTF-16** reservando la URL; fallback a `sendMessage` si excede
-- [ ] Dedup por `zonaprop_id`, nunca por URL
+- [x] Candidatas = `NOT EXISTS(deliveries)` **y** acotadas por `listing_sources` a las URLs del
+      usuario (sin esto se filtran publicaciones entre usuarios) — `TestCandidatesAreScopedToTheUsersOwnSearches`
+- [x] Baseline silencioso: la **primera indexación exitosa** de una búsqueda inserta `deliveries` de
+      toda la página sin enviar (`status='baseline'`), sin necesidad de estado extra
+- [x] `Notify(ctx, chatID, listingID, listing)` con keyboard 👍/👎 y `callback_data` `u:<id>` / `d:<id>`
+- [x] Caption presupuestado en **UTF-16** reservando la URL + el `\n`; fallback a `sendMessage` ante
+      un 400 (pero **no** ante 429/red, que duplicaría el mensaje)
+- [x] Dedup por `zonaprop_id`, nunca por URL
+- [x] `fetch.Result.Status/Header` aprovechado por el digest: `Stats` de saltos se loguea
 
 **Verificación:**
-- [ ] E2E con fakes: primera corrida manda, segunda silencio
-- [ ] Dry-run contra env real manda el inventario una sola vez
-- [ ] Reiniciar el proceso no re-manda
+- [x] `go test -count=1 ./internal/digest/...` con **Postgres real** (dbtest) + fakes de red
+- [x] **Corrección de la AC original:** la primera corrida **no manda nada** — baselina. Manda a
+      partir de la segunda, y solo lo nuevo. La AC decía "primera corrida manda", escrita antes de
+      que el baseline se decidiera; se corrige acá y en V1.6.
+- [x] Re-ejecutar no re-manda (`TestRepeatedRunIsSilent`), que es lo que hace seguro un reinicio
+- [x] Una búsqueda que falla no aborta el ciclo (`TestFailingSearchDoesNotAbortTheCycle`)
+- [x] Usuario inactivo no se procesa ni se fetchea (`TestInactiveUsersAreSkipped`)
+- [x] `go test -count=1 ./...` verde, `gofmt` y `vet` limpios
 
 **Dependencias:** V1.2, V1.3, V1.4
-**Archivos:** `internal/bot/*`, `internal/telegram/telegram.go`, `internal/digest/*` (mínimo)
+**Archivos:** `internal/digest/*` (nuevo), `internal/repo/{listings,deliveries,users}.go`,
+`internal/model/snapshot.go`, `internal/telegram/telegram.go` (reescrito), `cmd/bot/main.go`
+(recableado a la pila nueva), tests.
+**Decisión adelantada:** el gate `users.active` se implementó **acá** (`ListActiveUsers`) en vez de
+en V4.3, para que no exista una ventana en la que un desconocido reciba correo. V4.3 queda con el
+tope diario y el monitoreo de cobertura. El seed marca al operador como `active = true`.
 **Alcance:** M
 
 ### V1.6 Verificación E2E (dry-run y Telegram real)
 **Descripción:** Prueba de punta a punta con el usuario sembrado, sin código nuevo salvo ajustes.
 
 **Acceptance criteria:**
-- [ ] Dry-run: 1ª corrida notifica, siguientes en silencio
+- [ ] Dry-run: 1ª corrida **baselina en silencio** (no notifica), la 2ª manda solo lo nuevo
 - [ ] Telegram real: llega la tarjeta con foto, prestaciones y botones visibles
 - [ ] Los logs muestran el rate de fetch respetado
 

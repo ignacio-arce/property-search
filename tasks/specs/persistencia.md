@@ -120,7 +120,9 @@ deliveries(user_id BIGINT REFERENCES users ON DELETE CASCADE,
       model_version INT NOT NULL DEFAULT 0,
       features JSONB NOT NULL,             -- SNAPSHOT al enviar: se entrena con lo que el
                                            -- usuario vio, no con lo que mutó después
-      status TEXT NOT NULL DEFAULT 'pending',  -- pending|sent|failed|dead
+      status TEXT NOT NULL DEFAULT 'pending',  -- pending|sent|failed|dead|baseline
+                                           -- baseline = ya estaba al suscribirse: se registra
+                                           -- para no mandarlo, pero nunca se envió
       attempts INT NOT NULL DEFAULT 0,
       sent_at TIMESTAMPTZ,
       PRIMARY KEY(user_id, listing_id))

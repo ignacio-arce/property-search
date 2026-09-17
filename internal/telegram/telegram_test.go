@@ -64,7 +64,7 @@ func TestDryRunPrintsWithoutNetwork(t *testing.T) {
 
 	n, out := notifierFor(t, map[string]string{"SEARCH_URLS": "u"}, nil)
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), listing()); err != nil {
+	if err := n.Notify(context.Background(), "", 42, listing()); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if hit.Load() {
@@ -113,7 +113,7 @@ func TestNotifySendsMultipartPhoto(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: photoBytes})
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), listing()); err != nil {
+	if err := n.Notify(context.Background(), "", 42, listing()); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 }
@@ -135,7 +135,7 @@ func TestNotifyFallsBackToTextWhenNoPhoto(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, nil)
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), l); err != nil {
+	if err := n.Notify(context.Background(), "", 42, l); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 }
@@ -155,7 +155,7 @@ func TestNotifyFallsBackToTextWhenImageFetchFails(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{err: io.ErrUnexpectedEOF})
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), listing()); err != nil {
+	if err := n.Notify(context.Background(), "", 42, listing()); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 }
@@ -184,7 +184,7 @@ func TestNotifyHonorsRetryAfter(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: []byte("img")})
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), listing()); err != nil {
+	if err := n.Notify(context.Background(), "", 42, listing()); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if calls.Load() != 2 {
@@ -193,8 +193,7 @@ func TestNotifyHonorsRetryAfter(t *testing.T) {
 }
 
 func TestNotifyBuildsCaption(t *testing.T) {
-	n, _ := notifierFor(t, map[string]string{"SEARCH_URLS": "u"}, nil)
-	caption := n.caption(listing())
+	caption := caption(listing())
 	for _, want := range []string{"Casa en San Isidro", "USD 120.000", "180 m² tot.", "3 amb.", "San Isidro, GBA Norte", "https://www.zonaprop.com.ar/p/casa.html"} {
 		if !strings.Contains(caption, want) {
 			t.Errorf("caption missing %q:\n%s", want, caption)
@@ -211,5 +210,88 @@ func TestMultipartFieldNames(t *testing.T) {
 	w.Close()
 	if !strings.Contains(b.String(), `name="chat_id"`) {
 		t.Error("multipart missing chat_id field")
+	}
+}
+
+func TestNotifySendsRatingKeyboard(t *testing.T) {
+	var markup string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseMultipartForm(10 << 20)
+		markup = r.FormValue("reply_markup")
+		w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer server.Close()
+
+	n, _ := notifierFor(t, map[string]string{
+		"SEARCH_URLS":        "u",
+		"TELEGRAM_BOT_TOKEN": "123:abc",
+		"TELEGRAM_CHAT_ID":   "-100123",
+	}, stubImageFetcher{body: []byte("img")})
+	n.apiBase = server.URL
+	if err := n.Notify(context.Background(), "", 4242, listing()); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	for _, want := range []string{`"callback_data":"u:4242"`, `"callback_data":"d:4242"`} {
+		if !strings.Contains(markup, want) {
+			t.Errorf("reply_markup missing %q: %s", want, markup)
+		}
+	}
+}
+
+// The URL is the one field the user always needs, so truncation must never eat it.
+func TestCaptionKeepsURLWhenTruncated(t *testing.T) {
+	l := listing()
+	l.Title = strings.Repeat("Departamento amplio luminoso ", 200)
+
+	got := caption(l)
+	if n := utf16Len(got); n > captionLimit {
+		t.Errorf("caption is %d UTF-16 units, limit is %d", n, captionLimit)
+	}
+	if !strings.Contains(got, l.CanonicalURL) {
+		t.Error("truncated caption lost the URL")
+	}
+}
+
+// An emoji outside the BMP counts as two UTF-16 code units, so a rune count would
+// let the caption exceed the limit and the API would reject it.
+func TestCaptionCountsUTF16Units(t *testing.T) {
+	l := listing()
+	l.Title = strings.Repeat("🏠", 600) // 1200 UTF-16 units on its own
+
+	got := caption(l)
+	if n := utf16Len(got); n > captionLimit {
+		t.Errorf("caption is %d UTF-16 units, limit is %d", n, captionLimit)
+	}
+	if !strings.Contains(got, l.CanonicalURL) {
+		t.Error("caption lost the URL")
+	}
+}
+
+// A rejected photo request falls back to text, so the user still gets the listing
+// instead of nothing.
+func TestPhotoBadRequestFallsBackToText(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/sendPhoto") {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"ok":false,"description":"Bad Request: caption is too long"}`))
+			return
+		}
+		w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer server.Close()
+
+	n, _ := notifierFor(t, map[string]string{
+		"SEARCH_URLS":        "u",
+		"TELEGRAM_BOT_TOKEN": "123:abc",
+		"TELEGRAM_CHAT_ID":   "-100123",
+	}, stubImageFetcher{body: []byte("img")})
+	n.apiBase = server.URL
+	if err := n.Notify(context.Background(), "", 1, listing()); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if len(paths) != 2 || !strings.HasSuffix(paths[1], "/sendMessage") {
+		t.Errorf("paths = %v, want sendPhoto then sendMessage", paths)
 	}
 }

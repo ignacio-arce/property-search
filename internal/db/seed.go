@@ -64,8 +64,8 @@ func seedUser(ctx context.Context, pool *pgxpool.Pool, in SeedInput) error {
 	// bot was built to watch. The validator (V5.3) will decide whether operator
 	// seeds need re-checking.
 	_, err = pool.Exec(ctx,
-		`INSERT INTO users (user_id, chat_id, state, onboarded_at)
-		 VALUES ($1, $1, 'ready', now())
+		`INSERT INTO users (user_id, chat_id, state, onboarded_at, active)
+		 VALUES ($1, $1, 'ready', now(), true)
 		 ON CONFLICT (user_id) DO NOTHING`, userID)
 	if err != nil {
 		return fmt.Errorf("seed: user %d: %w", userID, err)
