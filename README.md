@@ -63,6 +63,6 @@ make probe             # fetch de la primera URL + parseo + resumen
 
 ### Pruebas
 
-`go test ./...` cubre: parseo (contra `fixtures/sample.html` y el DOM real de Zonaprop), dedup
+`go test ./...` cubre: parseo (contra `fixtures/search_gba_norte.html`, una pagina real de Zonaprop), dedup
 del historial, reintentos con backoff, modos de fetch (FlareSolverr / TLS / proxy), payload y
 rate-limit de Telegram, y el loop de orquestación con fakes.

@@ -43,13 +43,13 @@ func main() {
 				fmt.Printf("  ... (%d more)\n", len(listings)-3)
 				break
 			}
-			fmt.Printf("  - [%s] %s | %s | %s | %s | %s\n",
-				l.Price, l.Title, l.M2, l.Ambientes, l.Location, l.PhotoURL)
+			fmt.Printf("  - [%s] %s | %s | %s | %s\n",
+				l.PriceLabel(), l.Title, l.SizeLabel(), l.Location, l.PhotoURL)
 		}
 
-		out := "fixtures/sample.html"
+		out := "fixtures/probe_capture.html"
 		if cfg.DataDir != "" {
-			out = filepath.Join(cfg.DataDir, "sample.html")
+			out = filepath.Join(cfg.DataDir, "probe_capture.html")
 		}
 		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 			log.Printf("mkdir: %v", err)

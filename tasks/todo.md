@@ -105,28 +105,37 @@ V1 usa; el resto se agrega cuando su rebanada lo pida.
 (`FETCH_RATE_LIMIT`), `docker-compose.yml` (FS en loopback), `.env.example`
 **Alcance:** M
 
-### V1.4 Parser de card tipado
+### V1.4 Parser de card tipado ✅
 **Descripción:** Features reales y tipadas sobre el fixture real, con las correcciones que salieron
 de la sonda (outliers, m² cub. inexistente, dorm constante).
 
 **Acceptance criteria:**
-- [ ] `model.Listing` tipado: `ZonapropID`, `CanonicalURL`, `PriceAmount *int64`, `Currency`,
-      `M2Tot`/`M2Cub *float64`, `M2Basis`, `Dorm`/`Banos *int`, `Expensas *int64`, `Operation`
-- [ ] **`Operation` (operation_type) se detecta del path de la URL** (`-alquiler-` / `-venta-`) y
-      **`Currency` del prefijo del precio** (`USD` vs `$`→ARS); ambos van como columnas en `listings`
-- [ ] `Parse` deriva el **origin** de `siteBase` (bug pre-existente: se le pasa la URL de búsqueda
-      completa y los hrefs son root-relative) + test de regresión
-- [ ] `parsePrice` cubre `USD 83.900`, `$ 150.000.000`, `Desde USD …`, `Consultar precio` **y un
+- [x] `model.Listing` tipado: `ZonapropID`, `CanonicalURL`, `PriceAmount *int64`, `Currency`,
+      `M2Tot`/`M2Cub *float64`, `M2Basis`, `Rooms`/`Dorm`/`Banos *int`, `Expensas *int64`, `Operation`
+      (`Rooms` se conserva para mostrar; no puntúa)
+- [x] **`Operation` se detecta del path** (`alquiler`/`venta`) y **`Currency` del prefijo del precio**
+      (`USD` vs `$`→ARS)
+- [x] `Parse` deriva el **origin** de `siteBase` + test de regresión
+      (`TestCanonicalURLUsesOriginNotTheSearchPath`)
+- [x] `parsePrice` cubre `USD 144.000`, `$ 150.000.000`, `Desde USD …`, `Consultar precio` **y un
       alquiler mensual en ARS** (`$ 450.000`)
-- [ ] Guarda de outliers `m² ∈ [10,1000]`; ausentes → NULL, **nunca 0**
-- [ ] `partido`: último segmento, o el primero si es macrozona
+- [x] Guarda de outliers `m² ∈ [10,1000]`; ausentes → NULL, **nunca 0** (`TestMissingValuesStayNil`)
+- [x] `Partido()`: último segmento, o el primero si es macrozona (`San Isidro, GBA Norte` → `San Isidro`)
+- [x] `ParseWithStats` expone `Cards`/`SkippedType`/`SkippedNoID`: un cambio de DOM se cuenta en vez
+      de perderse en silencio
 
 **Verificación:**
-- [ ] `nix develop -c go test ./internal/parser/...` contra `fixtures/search_gba_norte.html`
-- [ ] Conteo de tarjetas PROPERTY y de `zonaprop_id` vacío expuestos
+- [x] `go test -count=1 ./internal/parser/...` verde contra `fixtures/search_gba_norte.html`
+      (30/30 tarjetas, 0 saltos, valores exactos de la tarjeta 1: id 60170922, USD 144.000, 69 m² tot.,
+      3 amb., 2 dorm., 1 baño, expensas 180.000, Florida/Vicente López)
+- [x] `go test -count=1 ./...` verde, `gofmt` y `vet` limpios
 
 **Dependencias:** V1.1
-**Archivos:** `internal/model/model.go`, `internal/parser/parser.go`, `internal/parser/parser_test.go`
+**Archivos:** `internal/model/*` (incluye `model_test.go` nuevo), `internal/parser/*`.
+**Adaptadores mínimos** que el cambio de modelo obligó (el plan lo anticipaba): `internal/store`
+(usa `ZonapropID`/`CanonicalURL`), `internal/telegram` (caption con `PriceLabel`/`SizeLabel`),
+`internal/bot`, `cmd/probe` y sus tests. Se **eliminó `fixtures/sample.html`** (sintético y
+engañoso: se lo llamaba "DOM real" sin serlo); el probe ahora escribe `probe_capture.html`.
 **Alcance:** M
 
 ### V1.5 Dedup + baseline silencioso + envío con botones

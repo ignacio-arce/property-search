@@ -38,15 +38,20 @@ func notifierFor(t *testing.T, env map[string]string, img imageFetcher) (*Notifi
 }
 
 func listing() model.Listing {
+	price := int64(120000)
+	m2 := 180.0
+	rooms := 3
 	return model.Listing{
-		ID:        "abc",
-		URL:       "https://www.zonaprop.com.ar/p/casa.html",
-		Title:     "Casa en San Isidro",
-		Price:     "USD 120.000",
-		M2:        "180 m² tot.",
-		Ambientes: "3 amb.",
-		Location:  "San Isidro, GBA Norte",
-		PhotoURL:  "https://imgar.zonapropcdn.com/avisos/1/2/3.jpg",
+		ZonapropID:   "abc",
+		CanonicalURL: "https://www.zonaprop.com.ar/p/casa.html",
+		Title:        "Casa en San Isidro",
+		PriceAmount:  &price,
+		Currency:     "USD",
+		M2Tot:        &m2,
+		M2Basis:      "tot",
+		Rooms:        &rooms,
+		Location:     "San Isidro, GBA Norte",
+		PhotoURL:     "https://imgar.zonapropcdn.com/avisos/1/2/3.jpg",
 	}
 }
 

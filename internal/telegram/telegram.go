@@ -138,20 +138,19 @@ func (n *Notifier) caption(l model.Listing) string {
 	var b strings.Builder
 	b.WriteString(l.Title)
 	b.WriteString("\n")
-	if l.Price != "" {
-		b.WriteString(l.Price)
+	if price := l.PriceLabel(); price != "" {
+		b.WriteString(price)
 		b.WriteString("\n")
 	}
-	line := strings.TrimSpace(strings.Join([]string{l.M2, l.Ambientes}, " · "))
-	if line != "" {
-		b.WriteString(line)
+	if size := l.SizeLabel(); size != "" {
+		b.WriteString(size)
 		b.WriteString("\n")
 	}
 	if l.Location != "" {
 		b.WriteString(l.Location)
 		b.WriteString("\n")
 	}
-	b.WriteString(l.URL)
+	b.WriteString(l.CanonicalURL)
 	return b.String()
 }
 

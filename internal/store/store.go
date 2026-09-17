@@ -84,10 +84,10 @@ func (s *Store) Contains(id string) bool {
 func (s *Store) Add(l model.Listing) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.seen[l.ID]; ok {
+	if _, ok := s.seen[l.ZonapropID]; ok {
 		return nil
 	}
-	line, err := json.Marshal(record{ID: l.ID, URL: l.URL, AddedAt: time.Now().UTC()})
+	line, err := json.Marshal(record{ID: l.ZonapropID, URL: l.CanonicalURL, AddedAt: time.Now().UTC()})
 	if err != nil {
 		return fmt.Errorf("store: marshal: %w", err)
 	}
@@ -98,7 +98,7 @@ func (s *Store) Add(l model.Listing) error {
 	if err := s.file.Sync(); err != nil {
 		return fmt.Errorf("store: sync: %w", err)
 	}
-	s.seen[l.ID] = struct{}{}
+	s.seen[l.ZonapropID] = struct{}{}
 	return nil
 }
 

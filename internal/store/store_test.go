@@ -18,7 +18,7 @@ func openIn(t *testing.T, dir string) *Store {
 }
 
 func sampleListing(id string) model.Listing {
-	return model.Listing{ID: id, URL: "https://www.zonaprop.com.ar/p/" + id + ".html", Title: "t", Price: "USD 1", M2: "1 m²", Ambientes: "1 amb.", Location: "x", PhotoURL: ""}
+	return model.Listing{ZonapropID: id, CanonicalURL: "https://www.zonaprop.com.ar/p/" + id + ".html", Title: "t", Location: "x"}
 }
 
 func TestStoreStartsEmpty(t *testing.T) {

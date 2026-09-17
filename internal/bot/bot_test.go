@@ -2,8 +2,6 @@ package bot
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"io"
 	"log"
 	"testing"
@@ -15,12 +13,12 @@ import (
 )
 
 const sampleHTML = `<html><body>
-<div data-to-posting="/p/uno.html"><h2 data-qa="POSTING_CARD_PRICE">USD 100</h2>
+<div data-to-posting="/p/uno.html" data-id="111" data-posting-type="PROPERTY"><h2 data-qa="POSTING_CARD_PRICE">USD 100</h2>
 <h3 data-qa="POSTING_CARD_FEATURES"><span>100 m² tot.</span><span>2 amb.</span></h3>
 <div data-qa="POSTING_CARD_GALLERY"><img src="https://img/x1.jpg"/></div>
 <h4 data-qa="POSTING_CARD_LOCATION">Lugar</h4>
 <h2 data-qa="POSTING_CARD_DESCRIPTION"><a href="/p/uno.html">Uno</a></h2></div>
-<div data-to-posting="/p/dos.html"><h2 data-qa="POSTING_CARD_PRICE">USD 200</h2>
+<div data-to-posting="/p/dos.html" data-id="222" data-posting-type="PROPERTY"><h2 data-qa="POSTING_CARD_PRICE">USD 200</h2>
 <h3 data-qa="POSTING_CARD_FEATURES"><span>200 m² tot.</span><span>4 amb.</span></h3>
 <div data-qa="POSTING_CARD_GALLERY"><img src="https://img/x2.jpg"/></div>
 <h4 data-qa="POSTING_CARD_LOCATION">Lugar2</h4>
@@ -81,7 +79,7 @@ func TestFirstRunNotifiesEverything(t *testing.T) {
 	if len(notifier.notified) != 2 {
 		t.Fatalf("notified %d listings, want 2 on first run", len(notifier.notified))
 	}
-	if !st.Contains(notifier.notified[0].ID) || !st.Contains(notifier.notified[1].ID) {
+	if !st.Contains(notifier.notified[0].ZonapropID) || !st.Contains(notifier.notified[1].ZonapropID) {
 		t.Error("first run must persist all notified ids")
 	}
 }
@@ -111,7 +109,7 @@ func TestFailedNotifyIsNotMarkedSeen(t *testing.T) {
 	if len(notifier.notified) != 0 {
 		t.Fatal("notifier error should prevent any id being recorded")
 	}
-	if st.Contains(sha1Of("https://www.zonaprop.com.ar/p/uno.html")) {
+	if st.Contains("111") {
 		t.Error("id must not be marked seen when notify failed")
 	}
 }
@@ -138,9 +136,4 @@ func TestContextCancellationStops(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected context error when context is already cancelled")
 	}
-}
-
-func sha1Of(s string) string {
-	h := sha1.Sum([]byte(s))
-	return hex.EncodeToString(h[:])
 }

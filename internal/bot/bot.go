@@ -55,7 +55,7 @@ func processURL(ctx context.Context, u string, fetcher Fetcher, notifier Notifie
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if st.Contains(l.ID) {
+		if st.Contains(l.ZonapropID) {
 			continue
 		}
 		if err := notifier.Notify(ctx, l); err != nil {

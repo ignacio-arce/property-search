@@ -82,7 +82,7 @@ Acá va el índice y el orden.
 - [x] V1.1 Config mínima + contenedores (config, compose base)
 - [x] V1.2 Postgres: migrador, seeds y esquema mínimo
 - [x] V1.3 Fetch: `Result{Status,Header}`, FS obligatorio, budget y carril prioritario
-- [ ] V1.4 Parser de card tipado sobre fixture real
+- [x] V1.4 Parser de card tipado sobre fixture real
 - [ ] V1.5 Dedup + baseline silencioso + envío con 👍/👎
 - [ ] V1.6 Verificación E2E (dry-run y Telegram real)
 
