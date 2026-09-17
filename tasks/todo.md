@@ -47,25 +47,29 @@ en `fetch` y `telegram` para que el bot **no** herede `HTTP_PROXY` del entorno v
 `http.DefaultTransport` (transporte cloneado con `Proxy = nil`).
 **Alcance:** M
 
-### V1.2 Postgres: migrador, seeds y esquema mínimo
+### V1.2 Postgres: migrador, seeds y esquema mínimo ✅
 **Descripción:** Persistencia con migraciones versionadas y seeds idempotentes. Solo las tablas que
 V1 usa; el resto se agrega cuando su rebanada lo pida.
 
 **Acceptance criteria:**
-- [ ] Pool `pgx` con **retry acotado** al arrancar (cubre el race del healthcheck)
-- [ ] Migrador versionado embebido (`go:embed` + `schema_migrations`), idempotente
-- [ ] Seeds: settings globales + usuario con `SEED_CHAT_ID` y sus `SEED_URLS` (formato de V1.1)
-- [ ] Esquema: `users` (con `active` y `active_model_version`), `search_urls`, `listings` (con
-      `recency_rank`), `listing_sources`, `deliveries`
-- [ ] Tests con `testcontainers-go`, con `t.Skip` si el daemon no está disponible
+- [x] Pool `pgx` con **retry acotado** al arrancar (cubre el race del healthcheck)
+- [x] Migrador versionado embebido (`go:embed` + `schema_migrations`), idempotente
+- [x] Seeds: settings globales + usuario con `SEED_CHAT_ID` y sus `SEED_URLS` (formato de V1.1)
+- [x] Esquema: `users` (con `active` y `active_model_version`), `search_urls`, `listings` (con
+      `recency_rank`), `listing_sources`, `deliveries`, `settings`
+- [x] Tests de integración contra Postgres real, con `t.Skip` si no está disponible (**desvío:** se
+      usa el Postgres de compose en `127.0.0.1:5432` en vez de testcontainers, para no arrastrar
+      docker/moby al `go.mod`; `dbtest.NewPool` crea una base descartable por test)
 
 **Verificación:**
-- [ ] `nix develop -c go test ./internal/db/...`
-- [ ] Correr migraciones + seeds **dos veces** seguidas sin error
-- [ ] Test de aislamiento: el usuario A no ve datos de B
+- [x] `go test -count=1 ./internal/db/... ./internal/repo/...` verde y **sin skips**
+- [x] Migraciones + seeds corridos **dos veces** seguidas sin error
+- [x] Aislamiento: `TestSearchURLsAreScopedPerUser` — A no ve las URLs de B
+- [x] `go test -count=1 ./...` verde, `gofmt` y `vet` limpios
 
 **Dependencias:** V1.1
-**Archivos:** `internal/db/*.go`, `migrations/*.sql`, `internal/user/*.go`, `go.mod`
+**Archivos:** `internal/db/*.go` (+ `internal/db/migrations/`), `internal/repo/*.go`,
+`internal/searchurl/*.go`, `internal/dbtest/*.go`, `go.mod`, `docker-compose.yml` (puerto loopback)
 **Alcance:** M
 
 ### V1.3 Fetch: `Result{Status,Header}`, FlareSolverr obligatorio, budget

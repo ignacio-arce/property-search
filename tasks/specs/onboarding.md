@@ -109,5 +109,5 @@ LAN del operador, y que una URL válida no quede colgada en `pending` para siemp
 
 ## Archivos
 
-`internal/onboarding/*.go` (nuevo), `internal/user/*.go`, `internal/validate/*.go` (nuevo),
+`internal/onboarding/*.go` (nuevo), `internal/repo/*.go`, `internal/validate/*.go` (nuevo),
 `internal/chat/*.go`, tests.

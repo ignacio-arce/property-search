@@ -106,7 +106,7 @@ arrancar** con este diseño: `config.Load` falla duro sin `SEARCH_URLS` y `main.
 - AC: `Makefile`: el target `image` buildea la tag `zonaprop-bot:arm64` que el compose renombrado ya
   no referencia; agregar targets para compose up/down/logs y para los tests de integración.
 - AC: `flake.nix`: devShell sigue con `go gopls gofumpt`; opcional `golangci-lint`. Los tests con
-  testcontainers necesitan el daemon de Docker, que ya está disponible en dev pero no lo garantiza
+  los tests de integracion necesitan Docker (o un Postgres alcanzable), que esta disponible en dev pero no lo garantiza
   el flake — por eso el `t.Skip`.
 - AC: los archivos del plan v1 quedan archivados en `tasks/archive/v1-zonaprop-bot/`, y el README
   deja claro que v2 los reemplaza y que el deploy del Pi de v1 no se hizo a propósito.

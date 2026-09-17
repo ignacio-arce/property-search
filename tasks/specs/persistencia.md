@@ -39,11 +39,16 @@ La dev machine no tenía Docker; ahora sí (29.7.2, x86_64). El deploy es arm64.
       URLs que el onboarding** — un typo del operador no puede convertirse en un zombie inmortal.
 - AC: **`SEED_URLS` = entradas separadas por coma, cada una `label|url`, en una sola línea.** En
       `env_file` los multi-línea sin comillas se parsean como entradas inválidas separadas.
-- AC: tests con `testcontainers-go`, con **`t.Skip` cuando el daemon no es alcanzable** — si no,
-      `go test ./...` queda acoplado al host y rompe en cualquier runner sin Docker.
+- AC: tests de integración contra un **Postgres real**, con **`t.Skip` cuando la base no es
+      alcanzable** — si no, `go test ./...` queda acoplado al host y rompe en cualquier runner sin
+      base. **Desvío respecto del plan:** se usa el Postgres de compose (publicado en
+      `127.0.0.1:5432`) en vez de `testcontainers-go`, para no arrastrar la cadena docker/moby al
+      `go.mod` por un solo proyecto. `dbtest.NewPool` crea una **base descartable por test** y la
+      borra al terminar, así que el aislamiento es real; lee `TEST_POSTGRES_DSN`, o `POSTGRES_*` del
+      entorno o del `.env` del repo.
 - AC: migraciones y seeds corren **dos veces seguidas sin error**.
 
-## C3 — `internal/user` y esquema
+## C3 — `internal/repo` y esquema
 
 - AC: capa repositorio donde **todo método exportado recibe `user_id` como primer argumento** y no
       se puede escribir una query sin él. El aislamiento es la propiedad más fácil de romper en
@@ -164,4 +169,6 @@ bot_state(id INT PRIMARY KEY CHECK (id = 1),
 
 ## Archivos
 
-`docker-compose.yml`, `internal/db/*.go`, `internal/user/*.go`, `migrations/*.sql`, `go.mod`.
+`docker-compose.yml`, `internal/db/*.go` (+ `internal/db/migrations/*.sql`, embebidas con
+`go:embed`, que exige que las SQL vivan dentro del paquete), `internal/repo/*.go`,
+`internal/searchurl/*.go`, `internal/dbtest/*.go`, `go.mod`.

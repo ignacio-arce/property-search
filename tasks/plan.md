@@ -80,7 +80,7 @@ Acá va el índice y el orden.
 ### V1: Camino de valor central — seed → fetch → manda con botones
 *El primer entregable usable. Acá vive el riesgo de Cloudflare.*
 - [x] V1.1 Config mínima + contenedores (config, compose base)
-- [ ] V1.2 Postgres: migrador, seeds y esquema mínimo
+- [x] V1.2 Postgres: migrador, seeds y esquema mínimo
 - [ ] V1.3 Fetch: `Result{Status,Header}`, FS obligatorio, budget y carril prioritario
 - [ ] V1.4 Parser de card tipado sobre fixture real
 - [ ] V1.5 Dedup + baseline silencioso + envío con 👍/👎

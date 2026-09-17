@@ -38,6 +38,11 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:?required}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Expuesto solo en loopback del host: lo necesitan los tests de integracion y
+    # el binario cuando se corre local contra el Postgres de compose. No se publica
+    # a la LAN.
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       # El -h 127.0.0.1 es load-bearing: sin el, pg_isready conecta por socket unix,
       # que el servidor temporal de initdb responde. El servicio se marca healthy
