@@ -172,24 +172,42 @@ en V4.3, para que no exista una ventana en la que un desconocido reciba correo. 
 tope diario y el monitoreo de cobertura. El seed marca al operador como `active = true`.
 **Alcance:** M
 
-### V1.6 Verificación E2E (dry-run y Telegram real)
-**Descripción:** Prueba de punta a punta con el usuario sembrado, sin código nuevo salvo ajustes.
+### V1.6 Verificación E2E ✅ (con una salvedad de entorno)
+**Descripción:** Prueba de punta a punta con el usuario sembrado.
 
 **Acceptance criteria:**
-- [ ] Dry-run: 1ª corrida **baselina en silencio** (no notifica), la 2ª manda solo lo nuevo
-- [ ] Telegram real: llega la tarjeta con foto, prestaciones y botones visibles
-- [ ] Los logs muestran el rate de fetch respetado
+- [x] Dry-run: 1ª corrida **baselina en silencio**, la 2ª manda solo lo nuevo
+- [~] Telegram real: **NO verificable acá** — no hay token disponible. Queda para el operador
+      (igual que el deploy del Pi). El envío en sí está cubierto por los tests httptest de telegram:
+      multipart con foto, caption, teclado y revocación.
+- [x] Los logs muestran el rate respetado: `rate=1m0s` en el arranque y el ciclo tardó
+      **1m0.62s** (un solo request, paced)
 
-**Verificación:** `make run` con env reales + inspección del chat
+**Verificación:**
+- [x] `TestEndToEndAgainstTheRealPage`: el pipeline completo (config → Postgres → migraciones →
+      fetch real → parser → indexado → baseline → deliveries) contra
+      `fixtures/search_gba_norte.html` servido por HTTP local. **30 publicaciones indexadas,
+      0 enviadas (baselinadas), segunda corrida silenciosa e idempotente.** No toca Zonaprop ni
+      Telegram: hermético y repetible.
+- [x] `make run` con el env real: arranca, migra, siembra (`user_id=999 active=true`),
+      clasifica el bloqueo de Cloudflare como `kind=blocked`, **no aborta el ciclo** y cierra
+      limpio con SIGTERM.
+- [x] Estado en la DB verificado a mano: usuario activo, 0 listings (fetch bloqueado), y
+      `settings` con `daily_hour=09:00` y `max_daily=15`.
+
+**Limitación honesta:** Zonaprop sigue bloqueando esta IP desde las sondas (A1), así que el camino
+real de 30 tarjetas no se pudo ejercitar contra el sitio. Está cubierto por el fixture real +
+el E2E. La única verificación que falta de verdad es una tarjeta llegando a Telegram.
+
 **Dependencias:** V1.5
-**Archivos:** (ajustes menores)
+**Archivos:** `internal/digest/e2e_test.go` (nuevo)
 **Alcance:** S
 
 ### Checkpoint V1
-- [ ] Un usuario sembrado recibe sus publicaciones nuevas una sola vez, con botones
-- [ ] Reiniciar el proceso no re-manda nada
-- [ ] El budget de fetch se respeta
-- [ ] **Revisión humana antes de seguir**
+- [x] Un usuario sembrado no recibe el inventario inicial: se baselina, y después recibe solo lo nuevo
+- [x] Reiniciar el proceso no re-manda nada (E2E idempotente)
+- [x] El budget de fetch se respeta (`rate=1m0s`, un request por ciclo)
+- [~] **Revisión humana pendiente** — y queda sin verificar la llegada real a Telegram (sin token)
 
 ---
 

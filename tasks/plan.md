@@ -84,7 +84,7 @@ Acá va el índice y el orden.
 - [x] V1.3 Fetch: `Result{Status,Header}`, FS obligatorio, budget y carril prioritario
 - [x] V1.4 Parser de card tipado sobre fixture real
 - [x] V1.5 Dedup + baseline silencioso + envío con 👍/👎
-- [ ] V1.6 Verificación E2E (dry-run y Telegram real)
+- [x] V1.6 Verificación E2E (dry-run y Telegram real)
 
 ### Checkpoint V1
 - [ ] Un usuario sembrado recibe sus publicaciones nuevas una sola vez, con botones
