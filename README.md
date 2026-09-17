@@ -48,6 +48,12 @@ Zonaprop responde `403` con `cf-mitigated: challenge`: un challenge que exige ej
 `tls-client` usando el perfil `Chrome_152`, ambos por proxy. La única vía que devolvió tarjetas fue
 FlareSolverr.
 
+**La versión importa, y mucho.** Con `v3.3.20` (Chromium 120, de diciembre de 2023) el challenge
+**no se resolvía nunca**: se probó con y sin proxy, y desde dos egresos distintos, siempre
+`Error solving the challenge`. Un browser de 2023 es trivialmente detectable. Con **`v3.5.2`**
+(Chromium 152) resuelve en ~11 segundos. Por eso el pin está fijado y **no** en `:latest`: la
+versión es parte de la configuración, no un detalle.
+
 ### Por qué el presupuesto de fetch es lo primero
 
 Durante las mediciones, Cloudflare escaló **después de ~4 requests en 10 minutos** y la URL que
@@ -155,7 +161,10 @@ make probe URL='https://...'   # fetch real + parseo + resumen, sin tocar la bas
 
 - **Cobertura**: solo la primera página de cada búsqueda (~30 publicaciones más nuevas). Zonaprop no
   expone paginación server-side en esa URL.
-- **Telegram**: no verificado end-to-end en el Pi.
+- **FlareSolverr en arm64**: la imagen pinneada está validada en x86_64. Falta confirmar que
+  arranque en el Pi (validación de arm64, fuera de este alcance).
+- **Telegram**: verificado end-to-end localmente (llegada de la tarjeta, baseline, envío de una
+  publicación nueva y calificación), pero **no en el Pi**.
 - **Teléfono**: no se confirmó que el `telephone` del detalle varíe por publicación. Si resultara
   genérico, el 👍 manda solo el link.
 - **Modelo**: con pocos datos el orden es prior más ruido; la UI lo dice en vez de disimularlo.

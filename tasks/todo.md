@@ -646,3 +646,31 @@ corregidas y con test de regresión:
 botones), baseline silencioso (29 publicaciones sin enviar), envío de la publicación nueva (real, id
 60124075, con link al portal), calificación con `✓ te gustó` en la tarjeta, y `/model` respondiendo
 con los conteos.
+
+---
+
+## Hallazgo tardío: la versión de FlareSolverr era la causa raíz
+
+Después de la verificación en vivo quedaba un problema abierto: la búsqueda real **no se podía leer
+nunca**. Yo lo había atribuido a que Cloudflare tenía la IP bloqueada, y llegué a sugerir cambiar el
+egreso por un proxy residencial.
+
+Al revisarlo con evidencia, la causa era otra:
+
+| Prueba | Resultado |
+|---|---|
+| IP directa vs. vía proxy | Distintas (`149.88.104.21` vs `146.70.188.34`) → el proxy funciona |
+| FlareSolverr v3.3.20 **con** proxy | `Error solving the challenge. Timeout after 90s` |
+| FlareSolverr v3.3.20 **sin** proxy | Idéntico → no era la IP del proxy |
+| Chromium de v3.3.20 | **120** (diciembre de 2023) |
+| Chromium de v3.5.2 | **152** |
+| FlareSolverr **v3.5.2** (con el mismo proxy) | **200, 30 tarjetas, 11s, sin challenge** |
+
+O sea: **era el browser antediluviano**, no la reputación de la IP. Pinneé v3.3.20 sin verificar
+cuál era la última versión, y encima el plan justificaba el pin diciendo "evitar regresiones arm64 de
+`latest`" — cierto como principio, pero me llevó a elegir una versión vieja sin comprobarla.
+
+**Corregido:** `docker-compose.yml` pinneado en `v3.5.2`, con el porqué documentado en el propio
+archivo y en el README. Verificado después con el probe real (`mode=flaresolverr`, 30 tarjetas) y
+con el digest: las 30 publicaciones reales de la búsqueda del operador quedaron indexadas y
+baselinadas.

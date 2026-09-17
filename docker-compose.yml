@@ -22,7 +22,7 @@ services:
         max-file: "3"
 
   flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:v3.3.20
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
     restart: unless-stopped
     environment:
       # ONLY PROXY_URL. Never HTTP_PROXY/HTTPS_PROXY: Chromium reads those from the
@@ -34,6 +34,10 @@ services:
     # listening on the Docker host is Chromium.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # v3.5.2, no :latest and no v3.3.x. The version matters more than it looks:
+    # v3.3.20 ships Chromium 120 (Dec 2023) and Cloudflare refused it from every
+    # egress we tried, proxy or not. v3.5.2 ships Chromium 152 and solves the
+    # challenge in ~11s.
     # FlareSolverr launches one Chromium per request and the fetch gate allows a
     # single request in flight, so this is sized for one browser.
     mem_limit: 1536m
