@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	// The image is FROM scratch with no zoneinfo, so without this import
+	// time.LoadLocation falls back to UTC and 09:00 local fires at 06:00.
+	_ "time/tzdata"
 
 	"os"
 	"os/signal"
@@ -16,6 +19,7 @@ import (
 	"zonapropbot/internal/digest"
 	"zonapropbot/internal/fetch"
 	"zonapropbot/internal/repo"
+	"zonapropbot/internal/scheduler"
 	"zonapropbot/internal/score"
 	"zonapropbot/internal/telegram"
 )
@@ -75,10 +79,11 @@ func main() {
 	fc := fetch.New(cfg)
 	nt := telegram.New(cfg, imageDownloader{fc}, os.Stdout)
 	runner := &digest.Runner{
-		Repo:     repo.New(pool),
-		Fetcher:  fc,
-		Notifier: nt,
-		Logger:   logger,
+		Repo:      repo.New(pool),
+		Fetcher:   fc,
+		Notifier:  nt,
+		Logger:    logger,
+		MaxPerRun: cfg.MaxDaily,
 	}
 
 	logger.Printf("bot: flaresolverr=%s proxy=%s rate=%s (dry-run=%v)",
@@ -100,16 +105,6 @@ func main() {
 		logger.Printf("retrain user %d: model v%d", u.UserID, version)
 	}
 
-	run := func() {
-		start := time.Now()
-		sent, err := runner.RunAll(ctx)
-		if err != nil {
-			logger.Printf("cycle aborted: %v", err)
-			return
-		}
-		logger.Printf("cycle done in %s: %d sent", time.Since(start).Round(time.Millisecond), sent)
-	}
-
 	// The poller runs alongside the digest loop: one consumes updates, the other
 	// produces deliveries. They share the process but not their state.
 	if cfg.TelegramBotToken != "" {
@@ -128,19 +123,33 @@ func main() {
 		logger.Printf("chat: no TELEGRAM_BOT_TOKEN, skipping inbound polling")
 	}
 
-	run()
-
-	ticker := time.NewTicker(cfg.CheckInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			logger.Println("signal received, shutting down")
-			return
-		case <-ticker.C:
-			run()
-		}
+	loc, err := time.LoadLocation(cfg.ScheduleTZ)
+	if err != nil {
+		log.Fatalf("schedule tz: %v", err)
 	}
+	hour, minute := cfg.DailyHourParts()
+
+	dailyRun := func(runCtx context.Context) {
+		start := time.Now()
+		sent, err := runner.RunDaily(runCtx, time.Now().In(loc))
+		if err != nil {
+			logger.Printf("digest: cycle aborted: %v", err)
+			return
+		}
+		logger.Printf("digest: cycle done in %s: %d sent", time.Since(start).Round(time.Millisecond), sent)
+	}
+
+	if cfg.RunOnStart {
+		logger.Printf("digest: RUN_ON_START is on, running one cycle at boot")
+		dailyRun(ctx)
+	}
+
+	next := scheduler.NextRun(time.Now(), loc, hour, minute)
+	logger.Printf("digest: daily at %s %s (next %s)", cfg.DailyHour, cfg.ScheduleTZ, next.Format(time.RFC3339))
+	if err := scheduler.Run(ctx, loc, hour, minute, dailyRun, logger, time.Now); err != nil {
+		logger.Printf("digest: scheduler stopped: %v", err)
+	}
+	logger.Println("signal received, shutting down")
 }
 
 func onOff(v string) string {

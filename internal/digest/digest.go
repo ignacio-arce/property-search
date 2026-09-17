@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"time"
 
 	"zonapropbot/internal/fetch"
 	"zonapropbot/internal/model"
@@ -114,6 +115,16 @@ func (r *Runner) indexSearch(ctx context.Context, userID int64, s repo.SearchURL
 	}
 	r.logf("digest: search %q: mode=%s cards=%d skipped_type=%d skipped_noid=%d parsed=%d",
 		s.Label, res.Mode, stats.Cards, stats.SkippedType, stats.SkippedNoID, len(listings))
+
+	if err := r.Repo.UpdateSearchURLStats(ctx, s.ID, res.Status, stats.Cards); err != nil {
+		r.logf("digest: could not record stats for %q: %v", s.Label, err)
+	}
+	// A search that keeps returning a full page is saturating: anything below the
+	// newest page is being missed, and that is a portal limit, not a bug.
+	if stats.Cards >= fullPageSize {
+		r.logf("digest: search %q returned a full page (%d cards); listings beyond it are not covered",
+			s.Label, stats.Cards)
+	}
 
 	for i, l := range listings {
 		listingID, err := r.Repo.UpsertListing(ctx, repo.ListingInput{
@@ -220,6 +231,10 @@ func (r *Runner) sendUndelivered(ctx context.Context, userID, chatID int64) (int
 // to be useful without turning the caption into a report.
 const maxReasonsOnCard = 2
 
+// fullPageSize is Zonaprop's page size. The portal serves only the first page, so
+// hitting it means the coverage ceiling was reached.
+const fullPageSize = 30
+
 // rankHeader states the position honestly. A percentage would be false precision
 // with this little data.
 func rankHeader(position, total int) string {
@@ -237,4 +252,53 @@ func (r *Runner) logf(format string, args ...any) {
 
 func formatChatID(chatID int64) string {
 	return fmt.Sprintf("%d", chatID)
+}
+
+// RunDaily runs the digest for every active user whose run for date is not
+// finished yet, and resumes any earlier unfinished run.
+//
+// The row is created for every active user before deciding whether to run, so a
+// day that is skipped by a lock is still recorded and can be resumed. The input is
+// "listings not yet delivered", not "today's listings", which is what makes a
+// resume correct rather than a duplicate.
+func (r *Runner) RunDaily(ctx context.Context, date time.Time) (int, error) {
+	users, err := r.Repo.ListActiveUsers(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, u := range users {
+		if err := r.Repo.EnsureDigest(ctx, u.UserID, date); err != nil {
+			r.logf("digest: could not record run for user %d: %v", u.UserID, err)
+		}
+	}
+
+	pending, err := r.Repo.PendingDigests(ctx, date)
+	if err != nil {
+		return 0, err
+	}
+	if len(pending) == 0 {
+		r.logf("digest: nothing pending for %s", date.Format("2006-01-02"))
+		return 0, nil
+	}
+
+	total := 0
+	for _, run := range pending {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		if err := r.Repo.StartDigest(ctx, run.UserID, run.RunDate); err != nil {
+			r.logf("digest: start run for user %d: %v", run.UserID, err)
+			continue
+		}
+
+		sent, runErr := r.RunForUser(ctx, run.UserID, run.ChatID)
+		if runErr != nil {
+			r.logf("digest: user %d failed: %v", run.UserID, runErr)
+		}
+		if err := r.Repo.FinishDigest(ctx, run.UserID, run.RunDate, sent, runErr); err != nil {
+			r.logf("digest: finish run for user %d: %v", run.UserID, err)
+		}
+		total += sent
+	}
+	return total, nil
 }

@@ -111,13 +111,13 @@ Acá va el índice y el orden.
 - [x] El orden con scores empatados es estable y a favor de lo más nuevo
 
 ### V4: Corre solo todos los días
-- [ ] V4.1 Scheduler tz-aware (tzdata, `SCHEDULE_TZ`, próximo 09:00, sin boot run)
-- [ ] V4.2 `digests` + resume + input auto-sanante
-- [ ] V4.3 Gate `active` + tope diario con excedente + monitoreo del techo de 30
+- [x] V4.1 Scheduler tz-aware (tzdata, `SCHEDULE_TZ`, próximo 09:00, sin boot run)
+- [x] V4.2 `digests` + resume + input auto-sanante
+- [x] V4.3 Tope diario con excedente + monitoreo del techo de 30
 
 ### Checkpoint V4
-- [ ] El digest corre solo para `active=true` y reanuda tras un restart a mitad
-- [ ] Un día interrumpido no se pierde
+- [x] El digest corre solo para `active=true` y reanuda tras un restart a mitad
+- [x] Un día interrumpido no se pierde
 
 ### V5: `/start` para desconocidos
 - [ ] V5.1 Máquina de estados + escritor serializado + comandos

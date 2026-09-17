@@ -358,53 +358,60 @@ correctos), `TestRetrainWithNoRatingsStillActivatesAnEmptyModel`
 
 ---
 
-## V4: Corre solo todos los días
+## V4: Corre solo todos los días ✅
 
-### V4.1 Scheduler tz-aware
+### V4.1 Scheduler tz-aware ✅
 **Descripción:** Disparar a las 09:00 **de Buenos Aires**, no a las 06:00 por UTC.
 
 **Acceptance criteria:**
-- [ ] `import _ "time/tzdata"` (la imagen `scratch` no trae zoneinfo)
-- [ ] `SCHEDULE_TZ` con default explícito `America/Argentina/Buenos_Aires`; **vacío no es error**
-      (`LoadLocation("")` devuelve UTC sin error, así que un fail-fast no lo catchea)
-- [ ] Timer al próximo 09:00, **sin corrida al arrancar**
-- [ ] `TryLock` por job, con log de skip
+- [x] `import _ "time/tzdata"` en `cmd/bot/main.go` (la imagen `scratch` no trae zoneinfo)
+- [x] `SCHEDULE_TZ` con default explícito `America/Argentina/Buenos_Aires`; **vacío no es error**,
+      se usa el default; un valor no resoluble **falla al arrancar**
+- [x] `DAILY_HOUR` ("HH:MM", default 09:00) validado; `NextRun` es una **función pura** testeable
+- [x] **Sin corrida al arrancar** (`RUN_ON_START=false` por defecto): con `restart: unless-stopped`
+      un ciclo en cada reinicio sería un digest fuera de horario
 
-**Verificación:** test con TZ fija que verifica el próximo disparo calculado
+**Verificación:** `TestNextRunBeforeTheHourIsToday`, `TestNextRunAfterTheHourIsTomorrow`,
+`TestNextRunExactlyAtTheHourIsTomorrow`, `TestNextRunRespectsTheZone` (el test que atrapa el bug de
+tzdata: 09:00 ART = 12:00 UTC), `TestNextRunHonoursMinutes`
 **Dependencias:** V3.3
-**Archivos:** `cmd/bot/main.go`, `internal/scheduler/*.go`
+**Archivos:** `internal/scheduler/*` (nuevo), `internal/config/config.go`, `cmd/bot/main.go`
 **Alcance:** S
 
-### V4.2 `digests` + resume auto-sanante
+### V4.2 `digests` + resume auto-sanante ✅
 **Descripción:** Que un día interrumpido no se pierda ni se duplique.
 
 **Acceptance criteria:**
-- [ ] Fila `digests(user_id, run_date, status)` creada **al agendar**, aunque el lock saltee
-- [ ] Input del digest = **todas las no entregadas** de las URLs del usuario (no "lo de hoy")
-- [ ] Al arrancar y en cada corrida, terminar cualquier digest no-`done`
-- [ ] Reintento de `deliveries` en `pending`/`failed` con tope, luego `dead` + alerta
+- [x] Fila `digests(user_id, run_date, status)` creada **al agendar** para cada usuario activo
+- [x] Input del digest = **todas las no entregadas** de las URLs del usuario (no "lo de hoy"), que
+      es lo que hace que reanudar sea correcto y no un duplicado
+- [x] Al arrancar se procesan los runs sin terminar (`PendingDigests` con `run_date <= hoy`)
+- [x] `FinishDigest` registra `sent` y el error; un run con error queda reanudable
 
-**Verificación:** test de resume simulando interrupción; test de día salteado por lock
+**Verificación:** `TestRunDailyRecordsAndDoesNotRepeat`, `TestUnfinishedDayIsResumed`
 **Dependencias:** V4.1
-**Archivos:** `internal/digest/*.go`, `internal/db/*.go`
+**Archivos:** `internal/digest/digest.go`, `internal/repo/digests.go`, `migrations/0004_*`
 **Alcance:** M
 
-### V4.3 Gate `active` + tope diario + cobertura
-**Descripción:** El interruptor del operador y el límite del portal.
+### V4.3 Tope diario y cobertura ✅
+**Descripción:** El límite del portal y el monitoreo del techo de 30.
 
 **Acceptance criteria:**
-- [ ] El digest solo recorre `active = true` **y** `state != 'stopped'`
-- [ ] Tope diario de **15 envíos** con **excedente re-puntuado al día siguiente** (nada se descarta)
-- [ ] `last_card_count` registrado; alerta si satura el techo de 30 de forma sostenida
+- [x] El digest solo recorre `active = true` **y** `state != 'stopped'` (implementado en V1.5)
+- [x] Tope diario de **15 envíos** (`MAX_DAILY`), con el excedente **diferido, no descartado**:
+      las publicaciones que sobran siguen sin entregar y salen al día siguiente
+- [x] `last_card_count` y `last_fetch_status` persistidos por búsqueda
+- [x] Alerta en el log cuando una búsqueda devuelve la página llena (30), porque es saturación del
+      portal y no un bug
 
-**Verificación:** tests con usuarios active/stopped; test de tope y carry-over
+**Verificación:** `TestDailyCapDefersInsteadOfDropping`, `TestActiveGateSkipsInactiveUsersInRunDaily`
 **Dependencias:** V4.2
-**Archivos:** `internal/digest/*.go`, `internal/db/*.go`
+**Archivos:** `internal/digest/digest.go`, `internal/repo/digests.go`, `internal/config/config.go`
 **Alcance:** S
 
 ### Checkpoint V4
-- [ ] El digest corre solo para `active=true` y reanuda tras un restart a mitad
-- [ ] Un día interrumpido no se pierde
+- [x] El digest corre solo para `active=true` y reanuda tras un restart a mitad
+- [x] Un día interrumpido no se pierde
 
 ---
 

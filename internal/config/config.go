@@ -63,6 +63,20 @@ type Config struct {
 	// SeedChatID and SeedURLs preseed one user at startup.
 	SeedChatID string
 	SeedURLs   []SeedURL
+
+	// ScheduleTZ is the IANA zone the daily hour is interpreted in. It defaults to
+	// Buenos Aires: an empty value is NOT a safe default, because
+	// time.LoadLocation("") returns UTC without error and the digest would fire at
+	// 06:00 local.
+	ScheduleTZ string
+	// DailyHour is the local time the digest runs, "HH:MM".
+	DailyHour string
+	// RunOnStart runs a cycle at boot. Off by default: with restart: unless-stopped
+	// that would fire a digest on every restart.
+	RunOnStart bool
+	// MaxDaily caps how many listings one user gets per day. The surplus is carried
+	// to the next day rather than dropped.
+	MaxDaily int
 }
 
 // Load reads configuration from the environment via getenv. It returns an
@@ -83,6 +97,9 @@ func Load(getenv func(string) string) (*Config, error) {
 		PostgresPort:      "5432",
 		PostgresUser:      "zonaprop",
 		PostgresDB:        "zonaprop",
+		ScheduleTZ:        "America/Argentina/Buenos_Aires",
+		DailyHour:         "09:00",
+		MaxDaily:          15,
 	}
 
 	if (cfg.TelegramBotToken == "") != (cfg.TelegramChatID == "") {
@@ -157,6 +174,36 @@ func Load(getenv func(string) string) (*Config, error) {
 	}
 	cfg.PostgresPassword = getenv("POSTGRES_PASSWORD")
 
+	if v := getenv("SCHEDULE_TZ"); v != "" {
+		cfg.ScheduleTZ = v
+	}
+	if _, err := time.LoadLocation(cfg.ScheduleTZ); err != nil {
+		return nil, fmt.Errorf("invalid SCHEDULE_TZ %q: %w", cfg.ScheduleTZ, err)
+	}
+
+	if v := getenv("DAILY_HOUR"); v != "" {
+		if _, _, err := parseHour(v); err != nil {
+			return nil, err
+		}
+		cfg.DailyHour = v
+	}
+
+	if v := getenv("RUN_ON_START"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid RUN_ON_START %q: must be a boolean", v)
+		}
+		cfg.RunOnStart = b
+	}
+
+	if v := getenv("MAX_DAILY"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("invalid MAX_DAILY %q: must be a positive integer", v)
+		}
+		cfg.MaxDaily = n
+	}
+
 	cfg.SeedChatID = getenv("SEED_CHAT_ID")
 	if cfg.SeedURLs, err = seedURLs(getenv("SEED_URLS")); err != nil {
 		return nil, err
@@ -175,6 +222,32 @@ func Load(getenv func(string) string) (*Config, error) {
 // FromEnv loads configuration from the process environment.
 func FromEnv() (*Config, error) {
 	return Load(os.Getenv)
+}
+
+// parseHour reads "HH:MM" into hour and minute.
+func parseHour(v string) (int, int, error) {
+	hour, minute, ok := strings.Cut(strings.TrimSpace(v), ":")
+	if !ok {
+		return 0, 0, fmt.Errorf("invalid DAILY_HOUR %q: expected HH:MM", v)
+	}
+	h, err := strconv.Atoi(hour)
+	if err != nil || h < 0 || h > 23 {
+		return 0, 0, fmt.Errorf("invalid DAILY_HOUR %q: hour must be 00-23", v)
+	}
+	m, err := strconv.Atoi(minute)
+	if err != nil || m < 0 || m > 59 {
+		return 0, 0, fmt.Errorf("invalid DAILY_HOUR %q: minute must be 00-59", v)
+	}
+	return h, m, nil
+}
+
+// DailyHourParts exposes the parsed hour and minute.
+func (c *Config) DailyHourParts() (int, int) {
+	h, m, err := parseHour(c.DailyHour)
+	if err != nil {
+		return 9, 0
+	}
+	return h, m
 }
 
 // DatabaseURL assembles the Postgres DSN. The password is escaped through

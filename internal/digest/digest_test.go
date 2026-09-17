@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"testing"
+	"time"
 
 	"zonapropbot/internal/db"
 	"zonapropbot/internal/dbtest"
@@ -308,4 +309,122 @@ func searchURLIDOf(t *testing.T, r *repo.Repo, userID int64, url string) int64 {
 	}
 	t.Fatalf("search %s not found for user %d", url, userID)
 	return 0
+}
+
+// RunDaily records a row per active user, runs it once, and marks it done. A
+// second call for the same date must not re-send.
+func TestRunDailyRecordsAndDoesNotRepeat(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa")}}
+	n := &recordingNotifier{}
+	runner := newRunner(r, f, n)
+	ctx := context.Background()
+	date := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+
+	if _, err := runner.RunDaily(ctx, date); err != nil {
+		t.Fatal(err)
+	}
+	done, err := r.DigestFinished(ctx, 1, date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done {
+		t.Fatal("the run must be marked done")
+	}
+
+	// A genuinely new listing, then a second run for the same date: the day is
+	// already done, so nothing is sent.
+	f.pages[searchA] = page("aaa", "bbb")
+	sent, err := runner.RunDaily(ctx, date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 0 || len(n.sent) != 0 {
+		t.Errorf("a repeated run for the same date sent %d (%v), want 0", sent, n.ids())
+	}
+}
+
+// An interrupted day stays pending and is resumed on the next boot.
+func TestUnfinishedDayIsResumed(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa")}}
+	n := &recordingNotifier{}
+	runner := newRunner(r, f, n)
+	ctx := context.Background()
+
+	yesterday := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	// Create the row without finishing it, simulating a crash mid-run.
+	if err := r.EnsureDigest(ctx, 1, yesterday); err != nil {
+		t.Fatal(err)
+	}
+
+	today := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+	sent, err := runner.RunDaily(ctx, today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The interrupted day is picked up even though today's row was just created.
+	if sent != 0 {
+		t.Errorf("the first index baselines, so sent = %d", sent)
+	}
+	done, err := r.DigestFinished(ctx, 1, yesterday)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done {
+		t.Error("the resumed day must be marked done")
+	}
+}
+
+// The daily cap defers the surplus instead of dropping it: the remaining listings
+// stay undelivered and go out the next day.
+func TestDailyCapDefersInsteadOfDropping(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	ctx := context.Background()
+
+	// Baseline with an empty-ish first page, then publish two new listings.
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa")}}
+	n := &recordingNotifier{}
+	runner := newRunner(r, f, n)
+	date := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+	if _, err := runner.RunDaily(ctx, date); err != nil {
+		t.Fatal(err)
+	}
+
+	f.pages[searchA] = page("aaa", "bbb", "ccc")
+	runner.MaxPerRun = 1
+	sent, err := runner.RunDaily(ctx, date.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sent != 1 {
+		t.Fatalf("sent %d, want 1 (the cap)", sent)
+	}
+
+	remaining, err := r.Candidates(ctx, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 1 {
+		t.Errorf("%d listings left, want 1 deferred to the next day", len(remaining))
+	}
+}
+
+func TestActiveGateSkipsInactiveUsersInRunDaily(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	ctx := context.Background()
+	if _, err := r.Pool().Exec(ctx, `UPDATE users SET active = false WHERE user_id = 1`); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa")}}
+	n := &recordingNotifier{}
+	runner := newRunner(r, f, n)
+
+	if _, err := runner.RunDaily(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if f.calls != 0 {
+		t.Errorf("inactive user was fetched %d times", f.calls)
+	}
 }
