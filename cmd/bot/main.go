@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"zonapropbot/internal/chat"
 	"zonapropbot/internal/config"
 	"zonapropbot/internal/contact"
@@ -26,6 +28,190 @@ import (
 	"zonapropbot/internal/telegram"
 	"zonapropbot/internal/validate"
 )
+
+// validatorInterval is how often the deep validator checks searches that are not
+// watched yet. It is short because it is the only path that can move a search from
+// "pending" to "watched", so it must not wait for the daily digest.
+const validatorInterval = 10 * time.Minute
+
+func main() {
+	cfg, err := config.FromEnv()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger := log.New(os.Stdout, "", log.LstdFlags)
+
+	pool, err := db.Open(ctx, cfg.DatabaseURL(), db.Options{Logger: logger})
+	if err != nil {
+		log.Fatalf("db: %v", err)
+	}
+	defer pool.Close()
+
+	if err := db.Migrate(ctx, pool); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+	if err := db.Seed(ctx, pool, seedInput(cfg)); err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+
+	app := newApp(cfg, pool, logger)
+	app.logStartup()
+	if err := app.retrainAll(ctx); err != nil {
+		log.Fatalf("retrain: %v", err)
+	}
+	app.startValidator(ctx)
+	app.startPoller(ctx)
+
+	loc, err := time.LoadLocation(cfg.ScheduleTZ)
+	if err != nil {
+		log.Fatalf("schedule tz: %v", err)
+	}
+	hour, minute := cfg.DailyHourParts()
+
+	if cfg.RunOnStart {
+		logger.Printf("digest: RUN_ON_START is on, running one cycle at boot")
+		app.runDigest(ctx, loc)
+	}
+
+	logger.Printf("digest: daily at %s %s (next %s)", cfg.DailyHour, cfg.ScheduleTZ,
+		scheduler.NextRun(time.Now(), loc, hour, minute).Format(time.RFC3339))
+	if err := scheduler.Run(ctx, loc, hour, minute,
+		func(runCtx context.Context) { app.runDigest(runCtx, loc) }, logger, time.Now); err != nil {
+		logger.Printf("digest: scheduler stopped: %v", err)
+	}
+
+	// Cancel and wait for the poller before returning: its deferred release of the
+	// poll lease needs a live pool, and the deferred pool.Close runs after this.
+	stop()
+	app.pollerWG.Wait()
+	logger.Println("signal received, shutting down")
+}
+
+// app groups the wiring the background jobs share, so each job reads as a named
+// step in main instead of an inline block.
+type app struct {
+	cfg     *config.Config
+	repo    *repo.Repo
+	fetcher *fetch.Client
+	notify  *telegram.Notifier
+	digest  *digest.Runner
+	logger  *log.Logger
+
+	// pollerWG tracks the Telegram poller so shutdown can wait for it.
+	pollerWG sync.WaitGroup
+}
+
+func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *log.Logger) *app {
+	fetcher := fetch.New(cfg)
+	notifier := telegram.New(cfg, imageDownloader{fc: fetcher}, os.Stdout)
+	repository := repo.New(pool)
+	return &app{
+		cfg:     cfg,
+		repo:    repository,
+		fetcher: fetcher,
+		notify:  notifier,
+		digest: &digest.Runner{
+			Repo:      repository,
+			Fetcher:   fetcher,
+			Notifier:  notifier,
+			Logger:    logger,
+			MaxPerRun: cfg.MaxDaily,
+		},
+		logger: logger,
+	}
+}
+
+func (a *app) logStartup() {
+	a.logger.Printf("bot: flaresolverr=%s proxy=%s rate=%s (dry-run=%v)",
+		onOff(a.cfg.FlareSolverrURL), onOff(a.cfg.ZonapropProxy),
+		a.cfg.FetchRateLimit, a.cfg.TelegramBotToken == "")
+}
+
+// retrainAll rebuilds every active user's model at boot, until the nightly job
+// exists. One user's failure must not stop the others, but a failure to read the
+// user list at all is fatal: the database is not usable.
+func (a *app) retrainAll(ctx context.Context) error {
+	users, err := a.repo.ListActiveUsers(ctx)
+	if err != nil {
+		return err
+	}
+	for _, u := range users {
+		version, err := score.Retrain(ctx, a.repo, u.UserID)
+		if err != nil {
+			a.logger.Printf("retrain user %d: %v", u.UserID, err)
+			continue
+		}
+		a.logger.Printf("retrain user %d: model v%d", u.UserID, version)
+	}
+	return nil
+}
+
+func (a *app) startValidator(ctx context.Context) {
+	validator := &validate.Validator{
+		Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.logger,
+	}
+	go func() {
+		ticker := time.NewTicker(validatorInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := validator.RunOnce(ctx); err != nil && ctx.Err() == nil {
+					a.logger.Printf("validate: %v", err)
+				}
+			}
+		}
+	}()
+}
+
+// startPoller consumes Telegram updates. It shares the process with the digest but
+// not its state: one consumes updates, the other produces deliveries.
+func (a *app) startPoller(ctx context.Context) {
+	if a.cfg.TelegramBotToken == "" {
+		a.logger.Printf("chat: no TELEGRAM_BOT_TOKEN, skipping inbound polling")
+		return
+	}
+	poller := &chat.Poller{
+		Repo:   a.repo,
+		API:    a.notify,
+		Logger: a.logger,
+		Contacts: &contact.Extractor{
+			Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.logger,
+		},
+		Holder: pollerHolder(),
+	}
+	a.pollerWG.Add(1)
+	go func() {
+		defer a.pollerWG.Done()
+		if err := poller.Run(ctx); err != nil {
+			a.logger.Printf("chat: poller stopped: %v", err)
+		}
+	}()
+}
+
+func (a *app) runDigest(ctx context.Context, loc *time.Location) {
+	start := time.Now()
+	sent, err := a.digest.RunDaily(ctx, time.Now().In(loc))
+	if err != nil {
+		a.logger.Printf("digest: cycle aborted: %v", err)
+		return
+	}
+	a.logger.Printf("digest: cycle done in %s: %d sent", time.Since(start).Round(time.Millisecond), sent)
+}
+
+func seedInput(cfg *config.Config) db.SeedInput {
+	seed := db.SeedInput{ChatID: cfg.SeedChatID}
+	for _, u := range cfg.SeedURLs {
+		seed.URLs = append(seed.URLs, db.SeedURL{Label: u.Label, URL: u.URL})
+	}
+	return seed
+}
 
 // pollerHolder identifies this process for the Telegram poll lease.
 func pollerHolder() string {
@@ -48,144 +234,6 @@ func (d imageDownloader) Fetch(ctx context.Context, u string) ([]byte, error) {
 		return nil, err
 	}
 	return res.Body, nil
-}
-
-func main() {
-	cfg, err := config.FromEnv()
-	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	logger := log.New(os.Stdout, "", log.LstdFlags)
-
-	// The poller runs in a goroutine and must finish before the pool closes, so its
-	// lease release does not fail against a dead connection.
-	var pollerWG sync.WaitGroup
-
-	pool, err := db.Open(ctx, cfg.DatabaseURL(), db.Options{Logger: logger})
-	if err != nil {
-		log.Fatalf("db: %v", err)
-	}
-	defer pool.Close()
-
-	if err := db.Migrate(ctx, pool); err != nil {
-		log.Fatalf("migrate: %v", err)
-	}
-
-	seed := db.SeedInput{ChatID: cfg.SeedChatID}
-	for _, u := range cfg.SeedURLs {
-		seed.URLs = append(seed.URLs, db.SeedURL{Label: u.Label, URL: u.URL})
-	}
-	if err := db.Seed(ctx, pool, seed); err != nil {
-		log.Fatalf("seed: %v", err)
-	}
-
-	rp := repo.New(pool)
-
-	fc := fetch.New(cfg)
-	nt := telegram.New(cfg, imageDownloader{fc}, os.Stdout)
-	runner := &digest.Runner{
-		Repo:      repo.New(pool),
-		Fetcher:   fc,
-		Notifier:  nt,
-		Logger:    logger,
-		MaxPerRun: cfg.MaxDaily,
-	}
-
-	logger.Printf("bot: flaresolverr=%s proxy=%s rate=%s (dry-run=%v)",
-		onOff(cfg.FlareSolverrURL), onOff(cfg.ZonapropProxy), cfg.FetchRateLimit, cfg.TelegramBotToken == "")
-
-	// Retrain each active user's model from their ratings. V4.2 turns this into a
-	// nightly job; doing it at startup keeps the model fresh until then.
-	activeUsers, err := rp.ListActiveUsers(ctx)
-	if err != nil {
-		log.Fatalf("list active users: %v", err)
-	}
-	for _, u := range activeUsers {
-		version, err := score.Retrain(ctx, rp, u.UserID)
-		if err != nil {
-			logger.Printf("retrain user %d: %v", u.UserID, err)
-			continue
-		}
-		logger.Printf("retrain user %d: model v%d", u.UserID, version)
-	}
-
-	// The deep validator checks new searches every ten minutes. It runs alongside
-	// everything else: it is the only path that can move a search from "pending" to
-	// "watched", so it must not depend on the daily digest.
-	validator := &validate.Validator{Repo: rp, Fetcher: fc, Notifier: nt, Logger: logger}
-	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if _, err := validator.RunOnce(ctx); err != nil && ctx.Err() == nil {
-					logger.Printf("validate: %v", err)
-				}
-			}
-		}
-	}()
-
-	// The poller runs alongside the digest loop: one consumes updates, the other
-	// produces deliveries. They share the process but not their state.
-	if cfg.TelegramBotToken != "" {
-		extractor := &contact.Extractor{Repo: rp, Fetcher: fc, Notifier: nt, Logger: logger}
-		poller := &chat.Poller{
-			Repo:     rp,
-			API:      nt,
-			Logger:   logger,
-			Contacts: extractor,
-			Holder:   pollerHolder(),
-		}
-		pollerWG.Add(1)
-		go func() {
-			defer pollerWG.Done()
-			if err := poller.Run(ctx); err != nil {
-				logger.Printf("chat: poller stopped: %v", err)
-			}
-		}()
-	} else {
-		logger.Printf("chat: no TELEGRAM_BOT_TOKEN, skipping inbound polling")
-	}
-
-	loc, err := time.LoadLocation(cfg.ScheduleTZ)
-	if err != nil {
-		log.Fatalf("schedule tz: %v", err)
-	}
-	hour, minute := cfg.DailyHourParts()
-
-	dailyRun := func(runCtx context.Context) {
-		start := time.Now()
-		sent, err := runner.RunDaily(runCtx, time.Now().In(loc))
-		if err != nil {
-			logger.Printf("digest: cycle aborted: %v", err)
-			return
-		}
-		logger.Printf("digest: cycle done in %s: %d sent", time.Since(start).Round(time.Millisecond), sent)
-	}
-
-	if cfg.RunOnStart {
-		logger.Printf("digest: RUN_ON_START is on, running one cycle at boot")
-		dailyRun(ctx)
-	}
-
-	next := scheduler.NextRun(time.Now(), loc, hour, minute)
-	logger.Printf("digest: daily at %s %s (next %s)", cfg.DailyHour, cfg.ScheduleTZ, next.Format(time.RFC3339))
-	if err := scheduler.Run(ctx, loc, hour, minute, dailyRun, logger, time.Now); err != nil {
-		logger.Printf("digest: scheduler stopped: %v", err)
-	}
-
-	// Cancel and wait for the poller before returning: its deferred release of the
-	// poll lease needs a live pool, and the deferred pool.Close runs after this.
-	stop()
-	pollerWG.Wait()
-	logger.Println("signal received, shutting down")
 }
 
 func onOff(v string) string {
