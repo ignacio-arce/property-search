@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"zonapropbot/internal/httpx"
 )
 
 type fsRequest struct {
@@ -58,7 +60,7 @@ func (c *Client) fetchViaFlareSolverr(ctx context.Context, u string) (*Result, e
 	// must not leak here.
 	hc := &http.Client{
 		Timeout:   c.cfg.MaxBrowserTimeout + fsClientTimeoutMargin,
-		Transport: noProxyTransport(),
+		Transport: httpx.NoProxyTransport(),
 	}
 	resp, err := hc.Do(req)
 	if err != nil {

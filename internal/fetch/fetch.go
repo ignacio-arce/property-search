@@ -215,16 +215,6 @@ func backoff(attempt int) time.Duration {
 	return base + jitter
 }
 
-// noProxyTransport clones the default transport with proxying disabled. The
-// rotating proxy is applied explicitly on the paths that need it (tls-client via
-// ZONAPROP_PROXY); other outbound calls must not pick up HTTP_PROXY from the
-// environment, which would route them through the proxy and break them.
-func noProxyTransport() *http.Transport {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.Proxy = nil
-	return t
-}
-
 // hasChallengeMarkers reports whether a response looks like a Cloudflare
 // challenge. The header is the reliable signal; the body markers cover the
 // FlareSolverr path, where headers are not available.
