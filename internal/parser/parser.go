@@ -71,54 +71,65 @@ func ParseWithStats(html []byte, siteBase string) ([]model.Listing, Stats, error
 	doc.Find("div[data-to-posting]").Each(func(_ int, card *goquery.Selection) {
 		stats.Cards++
 
+		// The two guards stay here because they are exactly what the skip counters
+		// report; everything else about a card is read below.
 		// v1 handles PROPERTY cards only. Development projects render a different
 		// price format and lack size and room features.
 		if card.AttrOr("data-posting-type", "") != "PROPERTY" {
 			stats.SkippedType++
 			return
 		}
-
 		zonapropID := strings.TrimSpace(card.AttrOr("data-id", ""))
 		if zonapropID == "" {
 			stats.SkippedNoID++
 			return
 		}
 
-		features := featureSpans(card)
-		m2Tot, m2Cub := sizes(features)
-		priceAmount, currency := parsePrice(text(card.Find("[data-qa=POSTING_CARD_PRICE]").First()))
-		expensas, _ := parseAmount(text(card.Find("[data-qa=expensas]").First()))
-
-		basis := ""
-		switch {
-		case m2Tot != nil:
-			basis = "tot"
-		case m2Cub != nil:
-			basis = "cub"
-		}
-
-		href := card.AttrOr("data-to-posting", "")
-
-		listings = append(listings, model.Listing{
-			ZonapropID:   zonapropID,
-			CanonicalURL: canonical(origin, href),
-			Title:        titleOf(card),
-			Location:     text(card.Find("[data-qa=POSTING_CARD_LOCATION]").First()),
-			PhotoURL:     photoURL(card),
-			PriceAmount:  priceAmount,
-			Currency:     currency,
-			Expensas:     expensas,
-			M2Tot:        m2Tot,
-			M2Cub:        m2Cub,
-			M2Basis:      basis,
-			Rooms:        featureInt(features, "amb."),
-			Dorm:         featureInt(features, "dorm."),
-			Banos:        featureInt(features, "baño"),
-			Operation:    operationFor(operation, href),
-		})
+		listings = append(listings, listingFromCard(card, zonapropID, origin, operation))
 	})
 
 	return listings, stats, nil
+}
+
+// listingFromCard reads every field of one card. origin and operation come from the
+// search page, which is authoritative for the whole result set.
+func listingFromCard(card *goquery.Selection, zonapropID, origin, operation string) model.Listing {
+	href := card.AttrOr("data-to-posting", "")
+	features := featureSpans(card)
+	m2Tot, m2Cub := sizes(features)
+	priceAmount, currency := parsePrice(text(card.Find("[data-qa=POSTING_CARD_PRICE]").First()))
+	expensas, _ := parseAmount(text(card.Find("[data-qa=expensas]").First()))
+
+	return model.Listing{
+		ZonapropID:   zonapropID,
+		CanonicalURL: canonical(origin, href),
+		Title:        titleOf(card),
+		Location:     text(card.Find("[data-qa=POSTING_CARD_LOCATION]").First()),
+		PhotoURL:     photoURL(card),
+		PriceAmount:  priceAmount,
+		Currency:     currency,
+		Expensas:     expensas,
+		M2Tot:        m2Tot,
+		M2Cub:        m2Cub,
+		M2Basis:      basisOf(m2Tot, m2Cub),
+		Rooms:        featureInt(features, "amb."),
+		Dorm:         featureInt(features, "dorm."),
+		Banos:        featureInt(features, "baño"),
+		Operation:    operationFor(operation, href),
+	}
+}
+
+// basisOf records which surface the size bucket came from, so total and covered
+// square metres are never blended.
+func basisOf(total, covered *float64) string {
+	switch {
+	case total != nil:
+		return "tot"
+	case covered != nil:
+		return "cub"
+	default:
+		return ""
+	}
 }
 
 // originOf reduces a URL to scheme://host. Callers pass the full search URL, so
