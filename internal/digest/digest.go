@@ -82,6 +82,7 @@ func (r *Runner) RunForUser(ctx context.Context, userID, chatID int64) (int, err
 		return 0, nil
 	}
 
+	fetched := 0
 	for _, s := range searches {
 		if err := ctx.Err(); err != nil {
 			return 0, err
@@ -90,7 +91,16 @@ func (r *Runner) RunForUser(ctx context.Context, userID, chatID int64) (int, err
 			// A failing URL must not abort the cycle: the remaining searches still
 			// get processed and the failure is logged.
 			r.logf("digest: search %q (%s) failed: %v", s.Label, s.URL, err)
+			continue
 		}
+		fetched++
+	}
+
+	// If not a single search could be read, the day was not a success: mark it so
+	// the run is retried instead of silently counted as done. A partial failure is
+	// different — the remaining listings are still undelivered and go out tomorrow.
+	if fetched == 0 {
+		return 0, fmt.Errorf("no search could be fetched for user %d (%d configured)", userID, len(searches))
 	}
 
 	return r.sendUndelivered(ctx, userID, chatID)

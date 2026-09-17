@@ -48,7 +48,9 @@ func (a *batchAPI) AnswerCallbackQuery(context.Context, string, string) error {
 }
 
 func (a *batchAPI) ClearRatingKeyboard(context.Context, string, int64) error { return nil }
-func (a *batchAPI) SendText(context.Context, string, string) error           { return nil }
+
+func (a *batchAPI) EditMessageCaption(context.Context, string, int64, string) error { return nil }
+func (a *batchAPI) SendText(context.Context, string, string) error                  { return nil }
 
 func newPollerWithAPI(t *testing.T, api API, holder string) (*Poller, *repo.Repo) {
 	t.Helper()

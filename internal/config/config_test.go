@@ -155,30 +155,26 @@ func TestSeedURLsRejectsMalformedEntries(t *testing.T) {
 	}
 }
 
-func TestTelegramCredentialsPairing(t *testing.T) {
+// The chat id is only a default target for local runs; the production recipient
+// comes from the database, so a token without a chat id is a valid configuration.
+func TestTelegramChatIDIsOptional(t *testing.T) {
 	cases := []struct {
-		name  string
-		env   map[string]string
-		valid bool
+		name string
+		env  map[string]string
 	}{
-		{"both empty is valid (dry-run)", map[string]string{}, true},
-		{"token without chat invalid", map[string]string{"TELEGRAM_BOT_TOKEN": "t"}, false},
-		{"chat without token invalid", map[string]string{"TELEGRAM_CHAT_ID": "c"}, false},
-		{"both set valid", map[string]string{"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"}, true},
+		{"token alone is valid (production)", map[string]string{"TELEGRAM_BOT_TOKEN": "t"}},
+		{"chat alone is harmless (dry-run)", map[string]string{"TELEGRAM_CHAT_ID": "c"}},
+		{"neither is valid (dry-run)", map[string]string{}},
+		{"both is valid (local dev)", map[string]string{"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_CHAT_ID": "c"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Load(envFromMap(tc.env))
-			if tc.valid && err != nil {
-				t.Fatalf("expected valid, got error: %v", err)
-			}
-			if !tc.valid && err == nil {
-				t.Fatal("expected error, got nil")
+			if _, err := Load(envFromMap(tc.env)); err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 		})
 	}
 }
-
 func TestFetchRetriesParsing(t *testing.T) {
 	cfg, err := Load(envFromMap(map[string]string{
 		"FETCH_RETRIES": "0",

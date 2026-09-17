@@ -37,7 +37,10 @@ ni duplica nada. Hoy `internal/telegram` solo envía y tiene un único `chat_id`
       `callback_query`): sin él Telegram muestra spinner y luego un toast de error. Es justamente
       la fricción que mata los datos.
 - AC: `editMessageReplyMarkup` revoca el teclado tras el primer tap y `editMessageCaption` agrega
-      "✓ te gustó" / "✗ no". Sin revocación, los botones quedan vivos semanas en el scrollback y
+      "✓ te gustó" / "✗ no te gustó" al caption original (el callback trae el caption, así que se
+      agrega sin reconstruir la tarjeta y sin perder el ranking ni las razones). Si el caption ya
+      está en el límite, se omite la nota: el toast y la revocación del teclado alcanzan.
+      **Un toast es fácil de perder y dura segundos; la constancia en la tarjeta no.**. Sin revocación, los botones quedan vivos semanas en el scrollback y
       generan taps fantasma.
 - AC: **first-tap-wins**. La revocación hace inalcanzable el `ON CONFLICT DO UPDATE` de `ratings`;
       dejar ambos es tener una semántica muerta en el esquema. Si se quisiera permitir cambiar de

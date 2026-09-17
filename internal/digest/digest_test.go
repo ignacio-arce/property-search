@@ -428,3 +428,39 @@ func TestActiveGateSkipsInactiveUsersInRunDaily(t *testing.T) {
 		t.Errorf("inactive user was fetched %d times", f.calls)
 	}
 }
+
+// A day where no search could be read is not a successful day: it must be retried
+// rather than counted as done.
+func TestDayWithNoReadableSearchIsNotDone(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	f := &fakeFetcher{err: map[string]error{searchA: fmt.Errorf("challenge")}}
+	n := &recordingNotifier{}
+	runner := newRunner(r, f, n)
+	ctx := context.Background()
+	date := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+
+	if _, err := runner.RunDaily(ctx, date); err != nil {
+		t.Fatalf("the cycle itself must not fail: %v", err)
+	}
+	done, err := r.DigestFinished(ctx, 1, date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done {
+		t.Error("a day with no readable search must stay retryable, not be marked done")
+	}
+
+	// Once the search works, the retry completes the day.
+	f.err = nil
+	f.pages = map[string][]byte{searchA: page("aaa")}
+	if _, err := runner.RunDaily(ctx, date); err != nil {
+		t.Fatal(err)
+	}
+	done, err = r.DigestFinished(ctx, 1, date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done {
+		t.Error("the retry should complete the day")
+	}
+}

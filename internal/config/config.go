@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -23,7 +22,9 @@ type SeedURL struct {
 // the corresponding path is skipped.
 type Config struct {
 	TelegramBotToken string
-	TelegramChatID   string
+	// TelegramChatID is an optional default recipient for local runs. Without a
+	// token the bot runs in dry-run and prints alerts instead.
+	TelegramChatID string
 
 	FlareSolverrURL string // optional
 	// ZonapropProxy is the rotating proxy for outgoing Zonaprop requests. It is
@@ -90,10 +91,9 @@ func Load(getenv func(string) string) (*Config, error) {
 		MaxDaily:          15,
 	}
 
-	if (cfg.TelegramBotToken == "") != (cfg.TelegramChatID == "") {
-		return nil, errors.New("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together (or both omitted for dry-run)")
-	}
-
+	// TELEGRAM_CHAT_ID is optional: it is only a default target for local runs.
+	// In production the recipient comes from the database, so requiring the pair
+	// would reject the correct configuration (token set, no default chat).
 	var err error
 
 	if v := getenv("FETCH_RETRIES"); v != "" {

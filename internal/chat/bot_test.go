@@ -20,6 +20,7 @@ import (
 type fakeAPI struct {
 	answers  []string
 	cleared  []int64
+	captions []string
 	texts    []string
 	clearErr error
 }
@@ -36,6 +37,11 @@ func (f *fakeAPI) ClearRatingKeyboard(_ context.Context, _ string, messageID int
 		return f.clearErr
 	}
 	f.cleared = append(f.cleared, messageID)
+	return nil
+}
+
+func (f *fakeAPI) EditMessageCaption(_ context.Context, _ string, _ int64, caption string) error {
+	f.captions = append(f.captions, caption)
 	return nil
 }
 
@@ -83,10 +89,14 @@ func delivered(t *testing.T, pool *pgxpool.Pool, userID, chatID int64, zonapropI
 
 func callback(data string, userID, chatID, messageID int64) *telegram.CallbackQuery {
 	return &telegram.CallbackQuery{
-		ID:      "cb-1",
-		From:    &telegram.User{ID: userID},
-		Message: &telegram.Message{MessageID: messageID, Chat: &telegram.Chat{ID: chatID, Type: "private"}},
-		Data:    data,
+		ID:   "cb-1",
+		From: &telegram.User{ID: userID},
+		Message: &telegram.Message{
+			MessageID: messageID,
+			Chat:      &telegram.Chat{ID: chatID, Type: "private"},
+			Caption:   "Casa en San Isidro\nUSD 120.000\nhttps://www.zonaprop.com.ar/p/casa.html",
+		},
+		Data: data,
 	}
 }
 
@@ -104,6 +114,13 @@ func TestCallbackRecordsRating(t *testing.T) {
 	}
 	if len(api.cleared) != 1 || api.cleared[0] != 555 {
 		t.Errorf("keyboard not revoked: %v", api.cleared)
+	}
+	// A toast is easy to miss, so the choice is also written onto the card.
+	if len(api.captions) != 1 || !strings.Contains(api.captions[0], "✓ te gustó") {
+		t.Errorf("rating note not written on the card: %v", api.captions)
+	}
+	if !strings.Contains(api.captions[0], "USD 120.000") {
+		t.Errorf("the note must be appended to the original caption, not replace it: %q", api.captions[0])
 	}
 
 	var label int
@@ -503,5 +520,57 @@ func TestRemoveURLNeedsAKnownLabel(t *testing.T) {
 	last := api.texts[len(api.texts)-1]
 	if !strings.Contains(last, "No encontré") {
 		t.Errorf("removing an unknown label should say so, got %q", last)
+	}
+}
+
+// The second tap must not append a second note or answer as if it had recorded
+// something new.
+func TestRepeatTapDoesNotDuplicateTheNote(t *testing.T) {
+	p, api, _, pool := newTestPoller(t)
+	listingID := delivered(t, pool, 7, 7, "aaa", time.Now())
+	ctx := context.Background()
+
+	if err := p.handleCallback(ctx, callback(fmt.Sprintf("u:%d", listingID), 7, 7, 555)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleCallback(ctx, callback(fmt.Sprintf("u:%d", listingID), 7, 7, 555)); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.captions) != 1 {
+		t.Errorf("the note was written %d times, want 1", len(api.captions))
+	}
+}
+
+// A card whose caption is already at the limit still gets its rating recorded; the
+// note is simply skipped.
+func TestRatingNoteIsSkippedWhenTheCaptionIsFull(t *testing.T) {
+	p, api, _, pool := newTestPoller(t)
+	listingID := delivered(t, pool, 7, 7, "aaa", time.Now())
+	ctx := context.Background()
+
+	// 510 astral emoji are 1020 UTF-16 code units, so appending the note (and its
+	// blank line) would push the caption past Telegram's 1024 limit.
+	cq := callback(fmt.Sprintf("u:%d", listingID), 7, 7, 555)
+	cq.Message.Caption = strings.Repeat("🏠", 510)
+
+	if err := p.handleCallback(ctx, cq); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.captions) != 0 {
+		t.Errorf("a full caption must not be edited, got %d edits", len(api.captions))
+	}
+
+	var label int
+	if err := pool.QueryRow(ctx, `SELECT label FROM ratings WHERE user_id = 7 AND listing_id = $1`, listingID).Scan(&label); err != nil {
+		t.Fatalf("the rating must still be recorded: %v", err)
+	}
+}
+
+func TestRatingNoteWording(t *testing.T) {
+	if got := ratingNote(1); !strings.Contains(got, "te gustó") {
+		t.Errorf("like note = %q", got)
+	}
+	if got := ratingNote(0); !strings.Contains(got, "no te gustó") {
+		t.Errorf("dislike note = %q", got)
 	}
 }

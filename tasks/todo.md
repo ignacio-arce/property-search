@@ -623,3 +623,26 @@ a "manda solo el link" sin romper nada.
 
 ---
 
+
+
+---
+
+## Hallazgos de la verificación en vivo (con el bot real y Telegram real)
+
+La verificación con token real destapó cosas que ningún test unitario iba a encontrar. Todas
+corregidas y con test de regresión:
+
+| Hallazgo | Qué pasaba | Fix |
+|---|---|---|
+| **Pairing de credenciales** | Con token y sin `TELEGRAM_CHAT_ID` el bot **se negaba a arrancar**, que es exactamente la configuración de producción (el destinatario sale de la base). Mi propia AC de V7.3 pedía relajarlo y solo lo había hecho en `dryRun()`. | Se eliminó la regla; el chat id es solo un destino por defecto para dev. |
+| **Errores de red clasificados como challenge** | FlareSolverr envuelve todo como *"Error solving the challenge. Message: net::ERR_CONNECTION_REFUSED"*, y el código lo marcaba `blocked` por la palabra "challenge". Se aplicaba cooldown por un problema que no existía. | `classifyFlareSolverrFailure`: si el mensaje envuelto es de red → `transport`. |
+| **Día sin lectura marcado como hecho** | Si ninguna búsqueda se podía leer, el día quedaba `done` y no se reintentaba. | `RunForUser` devuelve error cuando no pudo leer **ninguna** búsqueda; el día queda retryable. Un fallo parcial sigue siendo "hecho" (lo que falta sale mañana). |
+| **El link apuntaba a localhost** | El link de la tarjeta sale del origin de la página fetcheada; al servir el fixture desde HTTP local, el link heredó `127.0.0.1`. | Es del andamiaje de prueba, no del producto: el fixture servido ahora usa hrefs **absolutos** de Zonaprop. |
+| **"Título" = descripción completa** | `POSTING_CARD_DESCRIPTION` trae la descripción entera (miles de caracteres), y ocupaba el caption empujando fuera precio, m² y ubicación. | El título sale del `alt` de la galería (resumen corto y estructurado), con fallback a la descripción truncada. Además el título se acota a 100 unidades en el caption. |
+| **Sin constancia del tap** | El teclado se revocaba pero el único feedback era un toast efímero, fácil de perder. El plan pedía editar el caption y yo solo había hecho la revocación. | `editMessageCaption` agrega "✓ te gustó" / "✗ no te gustó", y el callback se **responde antes** de escribir en la base para que el aviso no llegue tarde. |
+| **`operation_type` vacío** | Se derivaba solo del path de la búsqueda; una URL sin "venta"/"alquiler" dejaba al usuario sin features numéricas. | Fallback al slug de cada publicación. |
+
+**Verificado en vivo con Telegram real:** llegada de la tarjeta (foto, precio, m², ubicación,
+botones), baseline silencioso (29 publicaciones sin enviar), envío de la publicación nueva (real, id
+60124075, con link al portal), calificación con `✓ te gustó` en la tarjeta, y `/model` respondiendo
+con los conteos.

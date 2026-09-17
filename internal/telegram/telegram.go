@@ -32,6 +32,10 @@ const (
 	// captionLimit is Telegram's cap on a photo caption, measured in UTF-16 code
 	// units (an astral-plane emoji counts as two, a rune count does not).
 	captionLimit = 1024
+	// maxTitleOnCard keeps the title from crowding out the structured fields. The
+	// description can be thousands of characters long, and truncating the whole
+	// caption would drop the price, the size and the location first.
+	maxTitleOnCard = 100
 )
 
 // Notifier sends listing alerts to a Telegram chat. Without a token it runs in
@@ -150,7 +154,7 @@ func caption(d model.Delivery) string {
 		head = append(head, d.Header)
 	}
 	if l.Title != "" {
-		head = append(head, l.Title)
+		head = append(head, truncateUTF16(l.Title, maxTitleOnCard))
 	}
 	if p := l.PriceLabel(); p != "" {
 		head = append(head, p)

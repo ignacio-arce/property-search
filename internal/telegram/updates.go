@@ -23,6 +23,10 @@ type Message struct {
 	From      *User  `json:"from"`
 	Chat      *Chat  `json:"chat"`
 	Text      string `json:"text"`
+	// Caption is present on a photo message, which is how the bot sends listings.
+	// The callback carries it, so a confirmation can be appended to the original
+	// text instead of rebuilding the card.
+	Caption string `json:"caption"`
 }
 
 // CallbackQuery is an inline-keyboard press.
@@ -92,6 +96,17 @@ func (n *Notifier) AnswerCallbackQuery(ctx context.Context, callbackID, text str
 		form.Set("text", text)
 	}
 	return n.postForm(ctx, "answerCallbackQuery", form)
+}
+
+// EditMessageCaption replaces a photo message's caption. It is how a rating is
+// recorded visibly: a toast is easy to miss and disappears in seconds.
+func (n *Notifier) EditMessageCaption(ctx context.Context, chatID string, messageID int64, caption string) error {
+	form := url.Values{
+		"chat_id":    {chatID},
+		"message_id": {strconv.FormatInt(messageID, 10)},
+		"caption":    {caption},
+	}
+	return n.postForm(ctx, "editMessageCaption", form)
 }
 
 // ClearRatingKeyboard removes the inline keyboard from a message, so a rating

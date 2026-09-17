@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"zonapropbot/internal/repo"
 	"zonapropbot/internal/score"
@@ -36,6 +37,7 @@ type API interface {
 	GetUpdates(ctx context.Context, offset int64) ([]telegram.Update, error)
 	AnswerCallbackQuery(ctx context.Context, callbackID, text string) error
 	ClearRatingKeyboard(ctx context.Context, chatID string, messageID int64) error
+	EditMessageCaption(ctx context.Context, chatID string, messageID int64, caption string) error
 	SendText(ctx context.Context, chatID, text string) error
 }
 
@@ -77,9 +79,11 @@ func (p *Poller) Run(ctx context.Context) error {
 		return fmt.Errorf("another instance holds the Telegram poll lease (holder %q): refusing to steal updates", p.Holder)
 	}
 	defer func() {
+		// On shutdown the pool may already be closed; that is expected and not worth
+		// reporting as an error. The lease also expires on its own.
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if err := p.Repo.ReleasePollLease(releaseCtx, p.Holder); err != nil {
+		if err := p.Repo.ReleasePollLease(releaseCtx, p.Holder); err != nil && releaseCtx.Err() == nil {
 			p.logf("chat: releasing poll lease: %v", err)
 		}
 	}()
@@ -196,14 +200,17 @@ func (p *Poller) handleCallback(ctx context.Context, cq *telegram.CallbackQuery)
 		return p.API.ClearRatingKeyboard(ctx, chatID, cq.Message.MessageID)
 	}
 
-	if err := p.Repo.RecordRating(ctx, userID, listingID, label); err != nil {
-		return err
-	}
-	// Answer before doing any network work: the detail fetch can take seconds, and
-	// the user's client gives up long before that.
+	// Answer before persisting. The client shows a spinner until the callback is
+	// answered and silently drops a late answer, which makes the button look dead.
 	if err := p.API.AnswerCallbackQuery(ctx, cq.ID, ratingAcknowledgement(label)); err != nil {
 		return err
 	}
+	if err := p.Repo.RecordRating(ctx, userID, listingID, label); err != nil {
+		return err
+	}
+	// A toast is easy to miss and lasts seconds, so the rating is also written onto
+	// the card itself.
+	p.confirmRatingOnCard(ctx, chatID, cq.Message, label)
 	if err := p.API.ClearRatingKeyboard(ctx, chatID, cq.Message.MessageID); err != nil {
 		return err
 	}
@@ -222,6 +229,38 @@ func (p *Poller) handleCallback(ctx context.Context, cq *telegram.CallbackQuery)
 	}
 	return nil
 }
+
+// confirmRatingOnCard appends the choice to the card's caption. It is best effort:
+// a failure here must not undo a rating that is already recorded.
+func (p *Poller) confirmRatingOnCard(ctx context.Context, chatID string, msg *telegram.Message, label int) {
+	if msg.Caption == "" || strings.Contains(msg.Caption, ratingNotePrefix) {
+		return
+	}
+	caption := msg.Caption + "\n\n" + ratingNote(label)
+	if utf16LenOf(caption) > maxCaptionUnits {
+		// The note does not fit; the toast and the revoked keyboard still apply.
+		p.logf("chat: caption for message %d is full, skipping the rating note", msg.MessageID)
+		return
+	}
+	if err := p.API.EditMessageCaption(ctx, chatID, msg.MessageID, caption); err != nil {
+		p.logf("chat: could not write the rating note on message %d: %v", msg.MessageID, err)
+	}
+}
+
+// ratingNotePrefix marks a card that already carries a rating note.
+const ratingNotePrefix = "✓"
+const maxCaptionUnits = 1024
+
+func ratingNote(label int) string {
+	if label == 1 {
+		return "✓ te gustó"
+	}
+	return "✗ no te gustó"
+}
+
+// utf16LenOf counts UTF-16 code units, which is what Telegram's caption limit
+// measures.
+func utf16LenOf(s string) int { return len(utf16.Encode([]rune(s))) }
 
 // parseCallbackData reads "u:<id>" (like) and "d:<id>" (dislike).
 func parseCallbackData(data string) (int, bool) {

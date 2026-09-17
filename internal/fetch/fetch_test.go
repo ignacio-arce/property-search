@@ -322,3 +322,23 @@ func TestTransportErrorIsClassified(t *testing.T) {
 		t.Errorf("kind = %v (ok=%v), want transport", kind, ok)
 	}
 }
+
+// FlareSolverr wraps every failure as "Error solving the challenge", so the word
+// alone is not evidence of a Cloudflare block: a connection error means the
+// challenge was never reached, and backing the gate off for it would be wrong.
+func TestClassifyFlareSolverrFailure(t *testing.T) {
+	cases := []struct {
+		message string
+		want    ErrorKind
+	}{
+		{"Error solving the challenge. Timeout after 60.0 seconds.", KindBlocked},
+		{"Error solving the challenge. Message: unknown error: net::ERR_CONNECTION_REFUSED", KindTransport},
+		{"Error solving the challenge. Message: unknown error: net::ERR_NAME_NOT_RESOLVED", KindTransport},
+		{"something else entirely", KindHTTPStatus},
+	}
+	for _, tc := range cases {
+		if got := classifyFlareSolverrFailure(tc.message); got != tc.want {
+			t.Errorf("classifyFlareSolverrFailure(%q) = %v, want %v", tc.message, got, tc.want)
+		}
+	}
+}

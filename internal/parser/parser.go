@@ -97,10 +97,12 @@ func ParseWithStats(html []byte, siteBase string) ([]model.Listing, Stats, error
 			basis = "cub"
 		}
 
+		href := card.AttrOr("data-to-posting", "")
+
 		listings = append(listings, model.Listing{
 			ZonapropID:   zonapropID,
-			CanonicalURL: canonical(origin, card.AttrOr("data-to-posting", "")),
-			Title:        text(card.Find("[data-qa=POSTING_CARD_DESCRIPTION] a").First()),
+			CanonicalURL: canonical(origin, href),
+			Title:        titleOf(card),
 			Location:     text(card.Find("[data-qa=POSTING_CARD_LOCATION]").First()),
 			PhotoURL:     photoURL(card),
 			PriceAmount:  priceAmount,
@@ -112,7 +114,7 @@ func ParseWithStats(html []byte, siteBase string) ([]model.Listing, Stats, error
 			Rooms:        featureInt(features, "amb."),
 			Dorm:         featureInt(features, "dorm."),
 			Banos:        featureInt(features, "baño"),
-			Operation:    operation,
+			Operation:    operationFor(operation, href),
 		})
 	})
 
@@ -149,14 +151,22 @@ func canonical(origin, href string) string {
 // operationOf reads venta/alquiler from the URL. The search path is authoritative
 // for every card on the page.
 func operationOf(raw string) string {
-	path := strings.ToLower(raw)
+	lower := strings.ToLower(raw)
+	sale := strings.Index(lower, "venta")
+	rent := strings.Index(lower, "alquiler")
 	switch {
-	case strings.Contains(path, "alquiler"):
+	case sale < 0 && rent < 0:
+		return ""
+	case sale < 0:
 		return "alquiler"
-	case strings.Contains(path, "venta"):
+	case rent < 0:
+		return "venta"
+	case sale < rent:
+		// A slug like "departamento-en-venta-y-alquiler" mentions both; the one that
+		// comes first is the headline operation.
 		return "venta"
 	default:
-		return ""
+		return "alquiler"
 	}
 }
 
@@ -277,6 +287,28 @@ func Partido(location string) string {
 	return last
 }
 
+// titleOf prefers the gallery image's alt text: it is a short, structured summary
+// ("Departamento · 60m² · 3 Ambientes · 1 Cochera · ..."). The DESCRIPTION block
+// holds the full listing description, thousands of characters long, and using it
+// as the title pushed the price, the size and the location out of the caption.
+func titleOf(card *goquery.Selection) string {
+	if alt := attr(card.Find("[data-qa=POSTING_CARD_GALLERY] img").First(), "alt"); alt != "" {
+		return alt
+	}
+	desc := text(card.Find("[data-qa=POSTING_CARD_DESCRIPTION]").First())
+	return truncateRunes(desc, fallbackTitleRunes)
+}
+
+const fallbackTitleRunes = 120
+
+func truncateRunes(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "…"
+}
+
 func photoURL(card *goquery.Selection) string {
 	img := card.Find("[data-qa=POSTING_CARD_GALLERY] img").First()
 	if v := attr(img, "src"); v != "" {
@@ -293,4 +325,16 @@ func text(sel *goquery.Selection) string {
 func attr(sel *goquery.Selection, name string) string {
 	v, _ := sel.Attr(name)
 	return strings.TrimSpace(v)
+}
+
+// operationFor falls back to the listing's own slug when the page URL does not say
+// which operation it is. Not every Zonaprop search URL carries "venta" or
+// "alquiler", and without an operation the scorer emits no numeric buckets at all
+// (price per m², expenses), because an ARS rental and a USD sale are not
+// comparable. The card slug almost always says which one it is.
+func operationFor(pageOperation, href string) string {
+	if pageOperation != "" {
+		return pageOperation
+	}
+	return operationOf(href)
 }

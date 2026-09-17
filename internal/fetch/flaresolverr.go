@@ -82,13 +82,7 @@ func (c *Client) fetchViaFlareSolverr(ctx context.Context, u string) (*Result, e
 	}
 
 	if fs.Status != "ok" {
-		// "Error solving the challenge. Timeout after Ns" is the measured failure
-		// when Cloudflare escalates; it must be classified as blocked, not as a
-		// transient error to retry.
-		kind := KindHTTPStatus
-		if strings.Contains(strings.ToLower(fs.Message), "challenge") {
-			kind = KindBlocked
-		}
+		kind := classifyFlareSolverrFailure(fs.Message)
 		return nil, &Error{
 			Kind:   kind,
 			Status: resp.StatusCode,
@@ -111,4 +105,27 @@ func (c *Client) fetchViaFlareSolverr(ctx context.Context, u string) (*Result, e
 		Mode:   mode,
 		Status: fs.Solution.Status,
 	}, nil
+}
+
+// classifyFlareSolverrFailure decides what a FlareSolverr error means.
+//
+// FlareSolverr wraps every failure as "Error solving the challenge. Message: ...",
+// so the word "challenge" alone is not evidence of a Cloudflare block. When the
+// wrapped error is a network failure the challenge was never even reached, and
+// treating that as blocked would back the gate off for nothing.
+func classifyFlareSolverrFailure(message string) ErrorKind {
+	lower := strings.ToLower(message)
+	for _, marker := range []string{
+		"err_connection", "err_name_not_resolved", "err_address_unreachable",
+		"err_tunnel_connection_failed", "err_proxy_connection_failed",
+		"err_timed_out", "connection refused",
+	} {
+		if strings.Contains(lower, marker) {
+			return KindTransport
+		}
+	}
+	if strings.Contains(lower, "challenge") || strings.Contains(lower, "timeout after") {
+		return KindBlocked
+	}
+	return KindHTTPStatus
 }

@@ -277,3 +277,105 @@ func eqF(a, b *float64) bool {
 	}
 	return *a == *b
 }
+
+// The card's DESCRIPTION holds the whole listing description, thousands of
+// characters long. Using it as the title pushed the price, size and location out of
+// the caption; the gallery image's alt is the short, structured summary.
+func TestTitleComesFromTheGalleryAltAndIsShort(t *testing.T) {
+	listings, err := Parse(loadRealPage(t), realSearchURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listings) == 0 {
+		t.Fatal("no listings")
+	}
+	title := listings[0].Title
+	if title == "" {
+		t.Fatal("title is empty")
+	}
+	if len([]rune(title)) > 200 {
+		t.Errorf("title is %d runes, too long for a caption: %q", len([]rune(title)), title[:80])
+	}
+	if !strings.Contains(title, "Departamento") {
+		t.Errorf("title = %q, want the gallery alt text", title)
+	}
+}
+
+// A card without a gallery alt still gets a usable, bounded title.
+func TestTitleFallsBackToATruncatedDescription(t *testing.T) {
+	long := strings.Repeat("Departamento amplio con balcón. ", 100)
+	html := `<html><body>
+	  <div data-to-posting="/p/x-1.html" data-id="1" data-posting-type="PROPERTY">
+	    <h2 data-qa="POSTING_CARD_DESCRIPTION">` + long + `</h2>
+	  </div>
+	</body></html>`
+	listings, err := Parse([]byte(html), realSearchURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listings) != 1 {
+		t.Fatalf("parsed %d", len(listings))
+	}
+	if got := len([]rune(listings[0].Title)); got > 200 {
+		t.Errorf("fallback title is %d runes, want a bounded summary", got)
+	}
+}
+
+// The search URL does not always say which operation it is; the listing slug
+// usually does. Without this the scorer would emit no numeric buckets at all for
+// that user.
+func TestOperationFallsBackToTheListingSlug(t *testing.T) {
+	html := `<html><body>
+	  <div data-to-posting="/propiedades/clasificado/departamento-en-venta-en-pilar-1.html"
+	       data-id="1" data-posting-type="PROPERTY"></div>
+	  <div data-to-posting="/propiedades/clasificado/departamento-en-alquiler-temporal-2.html"
+	       data-id="2" data-posting-type="PROPERTY"></div>
+	</body></html>`
+
+	listings, err := Parse([]byte(html), "https://www.zonaprop.com.ar/departamentos-gba-norte.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listings) != 2 {
+		t.Fatalf("parsed %d", len(listings))
+	}
+	if listings[0].Operation != "venta" {
+		t.Errorf("listing 1 operation = %q, want venta (from its slug)", listings[0].Operation)
+	}
+	if listings[1].Operation != "alquiler" {
+		t.Errorf("listing 2 operation = %q, want alquiler (from its slug)", listings[1].Operation)
+	}
+}
+
+// The page URL wins when it states the operation, which is authoritative for every
+// card on the page.
+func TestPageOperationWinsOverTheSlug(t *testing.T) {
+	html := `<html><body>
+	  <div data-to-posting="/propiedades/clasificado/departamento-en-venta-1.html"
+	       data-id="1" data-posting-type="PROPERTY"></div>
+	</body></html>`
+
+	listings, err := Parse([]byte(html), "https://www.zonaprop.com.ar/departamentos-alquiler-gba-norte.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listings[0].Operation != "alquiler" {
+		t.Errorf("operation = %q, want the page's alquiler", listings[0].Operation)
+	}
+}
+
+func TestOperationOfUsesTheFirstKeyword(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"departamento-en-venta-y-alquiler", "venta"},
+		{"alquiler-y-venta", "alquiler"},
+		{"departamentos-venta-gba-norte", "venta"},
+		{"departamentos-alquiler", "alquiler"},
+		{"departamentos-gba-norte", ""},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := operationOf(tc.in); got != tc.want {
+			t.Errorf("operationOf(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

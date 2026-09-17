@@ -40,7 +40,10 @@ Hoy `Listing` tiene todo en `string` (`Price`, `M2`, `Ambientes`). Cambia a:
       mensual, así que **vuelve al modelo** (ver F1). Ojo: está en **ARS** aunque el precio sea USD.
 - AC: `Operation string` (`venta` | `alquiler` | `""`) — el **`operation_type`** que pide el producto.
   Se detecta del **path** de la URL de búsqueda (`-alquiler-` / `-venta-`), que es la señal más
-  confiable, y se guarda como columna `operation_type` en `listings` (snake_case en DB/features,
+  confiable, **con fallback al slug de cada publicación** cuando la URL no lo dice: no todas las
+  búsquedas lo llevan, y sin operación el scorer no emite ninguna feature numérica (precio/m²,
+  expensas). Si el texto menciona ambas, gana la que aparece primero. Se guarda como columna
+  `operation_type` en `listings` (snake_case en DB/features,
   `Operation` en Go). El bot es multi-usuario y **admite alquileres**: las URLs de otros no vienen
   filtradas y `data/seen.jsonl` ya contiene tarjetas de alquiler. Es **clave de partición** del
   modelo, no un feature de scoring (ver `modelo-digest.md`).
