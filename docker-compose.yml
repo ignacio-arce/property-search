@@ -27,6 +27,10 @@ services:
       # contenedor queda en Exited (1) — dejando sin fetch a todo el sistema.
       - PROXY_URL=${FLARESOLVERR_PROXY_URL:-}
       - LOG_LEVEL=info
+    # Loopback del host, para poder correr el binario o el probe localmente.
+    # No se publica a la LAN: FlareSolverr maneja un browser real y es abusable.
+    ports:
+      - "127.0.0.1:8191:8191"
     # V7.1 agrega: extra_hosts host-gateway, mem_limit, healthcheck real y logging.
 
   postgres:

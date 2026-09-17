@@ -43,6 +43,10 @@ type Config struct {
 	FetchRetries      int
 	FetchTimeout      time.Duration
 	MaxBrowserTimeout time.Duration
+	// FetchRateLimit is the minimum spacing between outbound Zonaprop requests.
+	// It is the primary defence against Cloudflare degrading the IP, so it is
+	// tunable rather than hardcoded.
+	FetchRateLimit time.Duration
 
 	DataDir string
 
@@ -73,6 +77,7 @@ func Load(getenv func(string) string) (*Config, error) {
 		FetchRetries:      3,
 		FetchTimeout:      30 * time.Second,
 		MaxBrowserTimeout: 60 * time.Second,
+		FetchRateLimit:    60 * time.Second,
 		DataDir:           "data",
 		PostgresHost:      "localhost",
 		PostgresPort:      "5432",
@@ -124,6 +129,14 @@ func Load(getenv func(string) string) (*Config, error) {
 			return nil, fmt.Errorf("invalid MAX_BROWSER_TIMEOUT %q: must be a positive duration", v)
 		}
 		cfg.MaxBrowserTimeout = d
+	}
+
+	if v := getenv("FETCH_RATE_LIMIT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("invalid FETCH_RATE_LIMIT %q: must be a positive duration", v)
+		}
+		cfg.FetchRateLimit = d
 	}
 
 	if v := getenv("DATA_DIR"); v != "" {

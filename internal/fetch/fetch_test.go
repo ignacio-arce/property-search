@@ -24,13 +24,15 @@ func cfgFrom(t *testing.T, env map[string]string) *config.Config {
 	return cfg
 }
 
-func fsReply(status string, solutionStatus int, html string) string {
+func fsReply(status string, solutionStatus int, body string) string {
 	statusField := `"status":"` + status + `"`
 	if status == "ok" {
 		return `{` + statusField + `,"message":"","solution":{"status":` +
-			strconv.Itoa(solutionStatus) + `,"response":` + jsonString(html) + `}}`
+			strconv.Itoa(solutionStatus) + `,"response":` + jsonString(body) + `}}`
 	}
-	return `{` + statusField + `,"message":"boom"}`
+	// For the error case the third argument is the message, so tests can exercise
+	// the challenge wording that FlareSolverr actually returns.
+	return `{` + statusField + `,"message":` + jsonString(body) + `}`
 }
 
 func jsonString(s string) string {
@@ -83,32 +85,59 @@ func TestFlareSolverrSuccess(t *testing.T) {
 	}
 }
 
-func TestFlareSolverrRetriesUntilSuccess(t *testing.T) {
+// FlareSolverr must not be retried: each attempt launches a browser, so retrying
+// it multiplies the damage on an already-suspicious IP. The TLS loop carries the
+// retries instead.
+func TestFlareSolverrIsNotRetried(t *testing.T) {
 	var hits atomic.Int32
 	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if hits.Add(1) < 3 {
-			w.Write([]byte(fsReply("error", 0, "")))
-			return
-		}
-		w.Write([]byte(fsReply("ok", 200, "<html>finally</html>")))
+		hits.Add(1)
+		w.Write([]byte(fsReply("error", 0, "flaresolverr down")))
 	}))
 	defer fs.Close()
 
 	cfg := cfgFrom(t, map[string]string{
 		"SEARCH_URLS":      "https://target.invalid/x.html",
 		"FLARESOLVERR_URL": fs.URL,
+		"FETCH_RETRIES":    "0",
+	})
+	c := New(cfg)
+	if _, err := c.Fetch(context.Background(), "https://target.invalid/x.html"); err == nil {
+		t.Fatal("expected failure when FlareSolverr is down and the target is unreachable")
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("FlareSolverr hits = %d, want 1", got)
+	}
+}
+
+func TestFlareSolverrChallengeStopsImmediately(t *testing.T) {
+	var fsHits atomic.Int32
+	fs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fsHits.Add(1)
+		w.Write([]byte(fsReply("error", 0, "Error solving the challenge. Timeout after 60.0 seconds.")))
+	}))
+	defer fs.Close()
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("TLS must not be attempted after a challenge: it would burn the IP further")
+	}))
+	defer target.Close()
+
+	cfg := cfgFrom(t, map[string]string{
+		"SEARCH_URLS":      target.URL,
+		"FLARESOLVERR_URL": fs.URL,
 		"FETCH_RETRIES":    "3",
 	})
 	c := New(cfg)
-	res, err := c.Fetch(context.Background(), "https://target.invalid/x.html")
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
+	_, err := c.Fetch(context.Background(), target.URL)
+	if err == nil {
+		t.Fatal("expected an error")
 	}
-	if string(res.Body) != "<html>finally</html>" {
-		t.Errorf("body = %q, want <html>finally</html>", res.Body)
+	if kind, ok := KindOf(err); !ok || kind != KindBlocked {
+		t.Errorf("kind = %v (ok=%v), want blocked", kind, ok)
 	}
-	if hits.Load() != 3 {
-		t.Errorf("FlareSolverr hits = %d, want 3", hits.Load())
+	if got := fsHits.Load(); got != 1 {
+		t.Errorf("FlareSolverr hits = %d, want 1", got)
 	}
 }
 
@@ -234,5 +263,72 @@ func TestTLSThroughProxy(t *testing.T) {
 	}
 	if res.Mode != "tls-proxy" {
 		t.Errorf("Mode = %q, want tls-proxy", res.Mode)
+	}
+}
+
+func TestResultCarriesStatusAndHeader(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Test-Marker", "present")
+		w.Write([]byte("<html>ok</html>"))
+	}))
+	defer target.Close()
+
+	cfg := cfgFrom(t, map[string]string{
+		"SEARCH_URLS":   target.URL,
+		"FETCH_RETRIES": "0",
+	})
+	res, err := New(cfg).Fetch(context.Background(), target.URL)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if res.Status != http.StatusOK {
+		t.Errorf("Status = %d, want 200", res.Status)
+	}
+	if got := res.Header.Get("X-Test-Marker"); got != "present" {
+		t.Errorf("Header not propagated, X-Test-Marker = %q", got)
+	}
+}
+
+func TestForbiddenWithChallengeIsNotRetried(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		// This is exactly what Zonaprop answered during the probes.
+		w.Header().Set("cf-mitigated", "challenge")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer target.Close()
+
+	cfg := cfgFrom(t, map[string]string{
+		"SEARCH_URLS":   target.URL,
+		"FETCH_RETRIES": "3",
+	})
+	_, err := New(cfg).Fetch(context.Background(), target.URL)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if kind, ok := KindOf(err); !ok || kind != KindBlocked {
+		t.Errorf("kind = %v (ok=%v), want blocked", kind, ok)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("target hits = %d, want 1: a challenge must not be retried", got)
+	}
+}
+
+func TestTransportErrorIsClassified(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	url := target.URL
+	target.Close() // nothing is listening now
+
+	cfg := cfgFrom(t, map[string]string{
+		"SEARCH_URLS":   url,
+		"FETCH_RETRIES": "0",
+	})
+	_, err := New(cfg).Fetch(context.Background(), url)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if kind, ok := KindOf(err); !ok || kind != KindTransport {
+		t.Errorf("kind = %v (ok=%v), want transport", kind, ok)
 	}
 }

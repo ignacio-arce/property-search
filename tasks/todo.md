@@ -72,27 +72,37 @@ V1 usa; el resto se agrega cuando su rebanada lo pida.
 `internal/searchurl/*.go`, `internal/dbtest/*.go`, `go.mod`, `docker-compose.yml` (puerto loopback)
 **Alcance:** M
 
-### V1.3 Fetch: `Result{Status,Header}`, FlareSolverr obligatorio, budget
+### V1.3 Fetch: `Result{Status,Header}`, FlareSolverr obligatorio, budget ✅
 **Descripción:** El camino de red completo con el freno de mano puesto. Es la tarea de mayor riesgo.
 
 **Acceptance criteria:**
-- [ ] `Result` gana `Status` y `Header`; `fetchViaTLS` **propaga** status/headers en vez de colapsar
-      todo non-200 a un error genérico (sin esto la clasificación de V5.3 es imposible)
-- [ ] Timeout del cliente de FlareSolverr **mayor** que el `maxTimeout` (p. ej. 90s) y
-      **`maxTimeout` = 60s**; reintentos de FS **≤1** (medido: 150s × 3 = 7.5 min de browser churn)
-- [ ] Cadena por intento FS → proxy → directo, conservando `TestFlareSolverrFallsBackToTLS`
-- [ ] Budget global: token bucket **1 req/60s** (ráfaga 1) solo para `zonaprop.com.ar`, semáforo 1 con FS,
-      carril prioritario (operador + contactos), cooldown tras challenge
-- [ ] `errNoMode` muerto eliminado
+- [x] `Result` gana `Status` y `Header`; `fetchViaTLS` **propaga** status/headers en vez de colapsar
+      todo non-200 a un error genérico
+- [x] Timeout del cliente de FS = `MaxBrowserTimeout + 30s` (90s) y **`maxTimeout` = 60s**;
+      **FS se intenta UNA sola vez** por fetch (0 reintentos — más estricto que el ≤1 pedido: cada
+      intento lanza un browser)
+- [x] Cadena FS → proxy → directo, conservando `TestFlareSolverrFallsBackToTLS`
+- [x] Budget: `Gate` con 1 req/60s (`FETCH_RATE_LIMIT`), semáforo 1 con FS, carril prioritario y
+      cooldown de 5 min tras un challenge; el pacing aplica **solo a `zonaprop.com.ar`**, así las
+      fotos del CDN y los servidores de test no consumen el presupuesto
+- [x] Clasificación tipada: `fetch.Error{Kind,Status,Header}` con `KindTransport` / `KindBlocked` /
+      `KindHTTPStatus` y `KindOf(err)`
+- [x] `errNoMode` eliminado
 
 **Verificación:**
-- [ ] `nix develop -c go test ./internal/fetch/...`
-- [ ] `make probe` contra la URL real devuelve ~30 tarjetas y respeta el intervalo
-- [ ] Test de clasificación: 403 con `cf-mitigated` → bloqueado; 200 con 0 tarjetas → vacío;
-      timeout → transporte
+- [x] `go test -count=1 ./internal/fetch/...` verde
+- [x] Diagnóstico real: `403 + cf-mitigated: challenge` → `KindBlocked` y **no se reintenta**
+      (1 solo hit, contra `FETCH_RETRIES=3`); 403 pelado → reintentable; conexión rechazada →
+      `KindTransport`; `Header` propagado
+- [~] `make probe` contra la URL real: **corre y clasifica bien** (`kind=blocked`, status 500,
+      `Error solving the challenge`) y **no reintenta**. Las ~30 tarjetas **no se pudieron
+      verificar**: la IP sigue degradada por Cloudflare desde las sondas (A1). Es condición de red,
+      no del código — el mismo probe dio 30 tarjetas en A1.
+- [x] Verificación de "200 con 0 tarjetas → vacío" movida a V1.4/parser (es nivel parser, no fetch)
 
 **Dependencias:** V1.1
-**Archivos:** `internal/fetch/fetch.go`, `internal/fetch/tls.go`, `internal/fetch/flaresolverr.go`, `internal/fetch/fetch_test.go`
+**Archivos:** `internal/fetch/{fetch,tls,flaresolverr,gate}.go` + tests, `internal/config/config.go`
+(`FETCH_RATE_LIMIT`), `docker-compose.yml` (FS en loopback), `.env.example`
 **Alcance:** M
 
 ### V1.4 Parser de card tipado

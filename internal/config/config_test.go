@@ -307,6 +307,28 @@ func TestFetchRetriesParsing(t *testing.T) {
 	}
 }
 
+func TestFetchRateLimitParsing(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.FetchRateLimit != 60*time.Second {
+		t.Errorf("FetchRateLimit default = %v, want 60s", cfg.FetchRateLimit)
+	}
+
+	cfg, err = Load(envFromMap(map[string]string{"FETCH_RATE_LIMIT": "10m"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.FetchRateLimit != 10*time.Minute {
+		t.Errorf("FetchRateLimit = %v, want 10m", cfg.FetchRateLimit)
+	}
+
+	if _, err := Load(envFromMap(map[string]string{"FETCH_RATE_LIMIT": "0s"})); err == nil {
+		t.Fatal("expected error for a non-positive FETCH_RATE_LIMIT")
+	}
+}
+
 func TestFlareSolverrURLTrimmed(t *testing.T) {
 	cfg, err := Load(envFromMap(map[string]string{
 		"SEARCH_URLS":      "u",
