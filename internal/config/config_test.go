@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,13 +13,15 @@ func envFromMap(m map[string]string) func(string) string {
 	return func(key string) string { return m[key] }
 }
 
-func TestDefaultsAndRequiredURLs(t *testing.T) {
-	_, err := Load(envFromMap(map[string]string{}))
-	if err == nil {
-		t.Fatal("expected error when no search URLs are provided")
+func TestNoSearchURLsIsValid(t *testing.T) {
+	// Search URLs are per-user in Postgres now, so the process must be able to boot
+	// without any configured in env.
+	cfg, err := Load(envFromMap(map[string]string{}))
+	if err != nil {
+		t.Fatalf("expected no error without search URLs, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "search") {
-		t.Fatalf("error should mention search urls, got: %v", err)
+	if len(cfg.SearchURLs) != 0 {
+		t.Errorf("SearchURLs = %v, want empty", cfg.SearchURLs)
 	}
 }
 
@@ -44,9 +47,133 @@ func TestDefaultsApplied(t *testing.T) {
 	if cfg.DataDir != "data" {
 		t.Errorf("DataDir default = %q, want data", cfg.DataDir)
 	}
-	if cfg.FlareSolverrURL != "" || cfg.HTTPProxy != "" {
+	if cfg.FlareSolverrURL != "" || cfg.ZonapropProxy != "" {
 		t.Errorf("optional network services must default to empty, got fs=%q proxy=%q",
-			cfg.FlareSolverrURL, cfg.HTTPProxy)
+			cfg.FlareSolverrURL, cfg.ZonapropProxy)
+	}
+}
+
+func TestZonapropProxyParsed(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"ZONAPROP_PROXY": "http://192.168.1.150:8089",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ZonapropProxy != "http://192.168.1.150:8089" {
+		t.Errorf("ZonapropProxy = %q", cfg.ZonapropProxy)
+	}
+}
+
+func TestHTTPProxyIsIgnored(t *testing.T) {
+	// The app proxy variable is deliberately NOT named HTTP_PROXY: Go's net/http
+	// reads HTTP_PROXY from the environment by default, which would silently route
+	// Telegram and FlareSolverr traffic through the rotating proxy.
+	cfg, err := Load(envFromMap(map[string]string{
+		"HTTP_PROXY": "http://127.0.0.1:3128",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ZonapropProxy != "" {
+		t.Errorf("HTTP_PROXY must not populate ZonapropProxy, got %q", cfg.ZonapropProxy)
+	}
+}
+
+func TestPostgresDefaultsAndDSN(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"POSTGRES_PASSWORD": "s3cret",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.PostgresHost != "localhost" || cfg.PostgresPort != "5432" {
+		t.Errorf("postgres host/port defaults = %q/%q", cfg.PostgresHost, cfg.PostgresPort)
+	}
+	want := "postgres://zonaprop:s3cret@localhost:5432/zonaprop"
+	if got := cfg.DatabaseURL(); got != want {
+		t.Errorf("DatabaseURL() = %q, want %q", got, want)
+	}
+}
+
+func TestDatabaseURLEscapesPasswordMetacharacters(t *testing.T) {
+	// A strong password containing @ : / # % must survive DSN assembly. Interpolating
+	// it in compose instead would produce a DSN pgx parses wrongly, surfacing as an
+	// auth error that points at the wrong cause.
+	const pass = "p@ss:w/rd#1%"
+	cfg, err := Load(envFromMap(map[string]string{
+		"POSTGRES_USER":     "u",
+		"POSTGRES_PASSWORD": pass,
+		"POSTGRES_HOST":     "db",
+		"POSTGRES_PORT":     "6000",
+		"POSTGRES_DB":       "d",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	parsed, err := url.Parse(cfg.DatabaseURL())
+	if err != nil {
+		t.Fatalf("DatabaseURL() is not a valid URL: %v", err)
+	}
+	if got := parsed.User.Username(); got != "u" {
+		t.Errorf("username = %q, want u", got)
+	}
+	gotPass, _ := parsed.User.Password()
+	if gotPass != pass {
+		t.Errorf("password = %q, want %q", gotPass, pass)
+	}
+	if parsed.Host != "db:6000" {
+		t.Errorf("host = %q, want db:6000", parsed.Host)
+	}
+	if parsed.Path != "/d" {
+		t.Errorf("path = %q, want /d", parsed.Path)
+	}
+}
+
+func TestSeedURLsParsing(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{
+		"SEED_CHAT_ID": "-100123",
+		"SEED_URLS":    "San Isidro 3amb|https://www.zonaprop.com.ar/a.html, Pilar|https://www.zonaprop.com.ar/b.html",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SeedChatID != "-100123" {
+		t.Errorf("SeedChatID = %q", cfg.SeedChatID)
+	}
+	want := []SeedURL{
+		{Label: "San Isidro 3amb", URL: "https://www.zonaprop.com.ar/a.html"},
+		{Label: "Pilar", URL: "https://www.zonaprop.com.ar/b.html"},
+	}
+	if len(cfg.SeedURLs) != len(want) {
+		t.Fatalf("got %d seed urls, want %d: %+v", len(cfg.SeedURLs), len(want), cfg.SeedURLs)
+	}
+	for i := range want {
+		if cfg.SeedURLs[i] != want[i] {
+			t.Errorf("seed[%d] = %+v, want %+v", i, cfg.SeedURLs[i], want[i])
+		}
+	}
+}
+
+func TestSeedURLsRejectsMalformedEntries(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"missing separator", "https://www.zonaprop.com.ar/a.html"},
+		{"empty label", "|https://www.zonaprop.com.ar/a.html"},
+		{"empty url", "San Isidro|"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(envFromMap(map[string]string{"SEED_URLS": tc.raw}))
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "SEED_URLS") {
+				t.Errorf("error should name SEED_URLS, got: %v", err)
+			}
+		})
 	}
 }
 
@@ -199,7 +326,7 @@ func TestOptionalServicesInvalidURLs(t *testing.T) {
 		env  map[string]string
 	}{
 		{"invalid flaresolverr url", map[string]string{"SEARCH_URLS": "u", "FLARESOLVERR_URL": "://bad"}},
-		{"invalid http proxy", map[string]string{"SEARCH_URLS": "u", "HTTP_PROXY": "://bad"}},
+		{"invalid zonaprop proxy", map[string]string{"SEARCH_URLS": "u", "ZONAPROP_PROXY": "://bad"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

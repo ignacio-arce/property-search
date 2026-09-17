@@ -43,7 +43,10 @@ func (c *Client) fetchViaFlareSolverr(ctx context.Context, u string) ([]byte, er
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	hc := &http.Client{Timeout: c.cfg.FetchTimeout}
+	// Proxy disabled on purpose: FlareSolverr is a compose service reached by name,
+	// and the proxy is for Zonaprop traffic only. HTTP_PROXY from the environment
+	// must not leak here.
+	hc := &http.Client{Timeout: c.cfg.FetchTimeout, Transport: noProxyTransport()}
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("flaresolverr request: %w", err)

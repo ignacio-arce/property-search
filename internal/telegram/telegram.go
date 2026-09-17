@@ -49,11 +49,22 @@ func New(cfg *config.Config, img imageFetcher, out io.Writer) *Notifier {
 		token:    cfg.TelegramBotToken,
 		chatID:   cfg.TelegramChatID,
 		apiBase:  "https://api.telegram.org",
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   &http.Client{Timeout: 30 * time.Second, Transport: noProxyTransport()},
 		img:      img,
 		out:      out,
 		minDelay: defaultMinSendDelay,
 	}
+}
+
+// noProxyTransport clones the default transport with proxying disabled. The bot
+// must never inherit HTTP_PROXY from the environment: that variable is for
+// Zonaprop traffic only (via ZONAPROP_PROXY), and routing Telegram calls through
+// a rotating proxy would break them. It would also break calls to FlareSolverr,
+// whose compose service name does not resolve at the proxy.
+func noProxyTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return t
 }
 
 func (n *Notifier) dryRun() bool { return n.token == "" || n.chatID == "" }

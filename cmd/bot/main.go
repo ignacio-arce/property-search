@@ -47,7 +47,7 @@ func main() {
 
 	logger := log.New(os.Stdout, "", log.LstdFlags)
 	logger.Printf("zonaprop-bot: polling %d url(s) every %s (flaresolverr=%s proxy=%s)",
-		len(cfg.SearchURLs), cfg.CheckInterval, onOff(cfg.FlareSolverrURL), onOff(cfg.HTTPProxy))
+		len(cfg.SearchURLs), cfg.CheckInterval, onOff(cfg.FlareSolverrURL), onOff(cfg.ZonapropProxy))
 
 	run := func() {
 		start := time.Now()

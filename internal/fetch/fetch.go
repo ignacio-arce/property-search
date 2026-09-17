@@ -5,10 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net/http"
 	"time"
 
 	"zonapropbot/internal/config"
 )
+
+// noProxyTransport clones the default transport with proxying disabled. The
+// rotating proxy is applied explicitly on the paths that need it (tls-client via
+// ZONAPROP_PROXY); other outbound calls must not pick up HTTP_PROXY from the
+// environment, which would route them through the proxy and break them.
+func noProxyTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	return t
+}
 
 // Result is a successfully fetched document plus the mode that produced it.
 type Result struct {
@@ -53,7 +64,7 @@ func (c *Client) Fetch(ctx context.Context, u string) (*Result, error) {
 		body, err := c.fetchViaTLS(ctx, u)
 		if err == nil {
 			mode := "tls"
-			if c.cfg.HTTPProxy != "" {
+			if c.cfg.ZonapropProxy != "" {
 				mode = "tls-proxy"
 			}
 			return &Result{Body: body, Mode: mode}, nil

@@ -20,8 +20,8 @@ func (c *Client) fetchViaTLS(ctx context.Context, u string) ([]byte, error) {
 		httpclient.WithClientProfile(profiles.Chrome_152),
 		httpclient.WithTimeoutSeconds(int(c.cfg.FetchTimeout.Seconds())),
 	}
-	if c.cfg.HTTPProxy != "" {
-		options = append(options, httpclient.WithProxyUrl(c.cfg.HTTPProxy))
+	if c.cfg.ZonapropProxy != "" {
+		options = append(options, httpclient.WithProxyUrl(c.cfg.ZonapropProxy))
 	}
 
 	client, err := httpclient.NewHttpClient(httpclient.NewNoopLogger(), options...)

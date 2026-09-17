@@ -6,5 +6,46 @@ services:
     env_file: .env
     environment:
       - TZ=America/Argentina/Buenos_Aires
+      # FlareSolverr se resuelve por nombre de servicio en la red de compose.
+      - FLARESOLVERR_URL=http://flaresolverr:8191
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+      flaresolverr:
+        condition: service_started
     volumes:
       - ./data:/data
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.3.20
+    restart: unless-stopped
+    environment:
+      # SOLO PROXY_URL. Nunca HTTP_PROXY/HTTPS_PROXY: Chromium los lee del entorno,
+      # su test de instalacion falla con "Error getting browser User-Agent" y el
+      # contenedor queda en Exited (1) — dejando sin fetch a todo el sistema.
+      - PROXY_URL=${FLARESOLVERR_PROXY_URL:-}
+      - LOG_LEVEL=info
+    # V7.1 agrega: extra_hosts host-gateway, mem_limit, healthcheck real y logging.
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:?required}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?required}
+      - POSTGRES_DB=${POSTGRES_DB:?required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # El -h 127.0.0.1 es load-bearing: sin el, pg_isready conecta por socket unix,
+      # que el servidor temporal de initdb responde. El servicio se marca healthy
+      # antes de escuchar TCP y el bot arranca contra un Postgres que no responde.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

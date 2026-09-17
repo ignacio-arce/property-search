@@ -19,12 +19,12 @@ correr como imagen Docker ARM64 en una Raspberry Pi 5.
 
 ## Servicios de red opcionales
 
-`FLARESOLVERR_URL` y `HTTP_PROXY` son **opcionales**: sólo se usan si su variable está definida.
+`FLARESOLVERR_URL` y `ZONAPROP_PROXY` son **opcionales**: sólo se usan si su variable está definida.
 
 | Config | Efecto |
 |--------|--------|
 | `FLARESOLVERR_URL` definida | Resuelve el challenge de Cloudflare con FlareSolverr (navegador real). |
-| Sin FS, con `HTTP_PROXY` | Cliente Go con huella TLS de Chrome (equivalente a `cloudscraper`) saliendo por el proxy rotativo; cada reintento abre conexión nueva (nueva IP). |
+| Sin FS, con `ZONAPROP_PROXY` | Cliente Go con huella TLS de Chrome (equivalente a `cloudscraper`) saliendo por el proxy rotativo; cada reintento abre conexión nueva (nueva IP). |
 | Sin ninguna | Conexión directa con huella TLS de Chrome. |
 
 En la práctica Zonaprop acepta la huella TLS de Chrome; el proxy/FlareSolverr ayudan cuando

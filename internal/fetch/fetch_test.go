@@ -220,9 +220,9 @@ func TestTLSThroughProxy(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":   target.URL,
-		"HTTP_PROXY":    proxy.URL,
-		"FETCH_RETRIES": "0",
+		"SEARCH_URLS":    target.URL,
+		"ZONAPROP_PROXY": proxy.URL,
+		"FETCH_RETRIES":  "0",
 	})
 	c := New(cfg)
 	res, err := c.Fetch(context.Background(), target.URL)
