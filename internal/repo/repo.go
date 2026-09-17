@@ -52,6 +52,7 @@ type SearchURL struct {
 	URL              string
 	URLNorm          string
 	ValidationStatus string
+	Attempts         int
 }
 
 // AddSearchURL registers a search for the user. Re-adding the same normalized URL
@@ -86,7 +87,7 @@ func (r *Repo) ListValidSearchURLs(ctx context.Context, userID int64) ([]SearchU
 
 func (r *Repo) listSearchURLs(ctx context.Context, userID int64, extraWhere string) ([]SearchURL, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, label, url, url_norm, validation_status
+		`SELECT id, label, url, url_norm, validation_status, attempts
 		   FROM search_urls
 		  WHERE user_id = $1 `+extraWhere+`
 		  ORDER BY label`, userID)
@@ -98,7 +99,7 @@ func (r *Repo) listSearchURLs(ctx context.Context, userID int64, extraWhere stri
 	var out []SearchURL
 	for rows.Next() {
 		var s SearchURL
-		if err := rows.Scan(&s.ID, &s.Label, &s.URL, &s.URLNorm, &s.ValidationStatus); err != nil {
+		if err := rows.Scan(&s.ID, &s.Label, &s.URL, &s.URLNorm, &s.ValidationStatus, &s.Attempts); err != nil {
 			return nil, fmt.Errorf("repo: scan search url: %w", err)
 		}
 		out = append(out, s)

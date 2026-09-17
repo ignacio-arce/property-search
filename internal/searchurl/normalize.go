@@ -68,3 +68,32 @@ func Normalize(raw string) (string, error) {
 
 	return u.String(), nil
 }
+
+// recentSortSuffix is Zonaprop's path suffix for ordering by publication date
+// descending. The probe confirmed it works, and it is what makes the newest
+// listings appear first — which is the whole basis of "tell me what is new".
+const recentSortSuffix = "-orden-publicado-descendente"
+
+// InjectRecentSort rewrites a search URL to order by most recently published if it
+// does not already. It returns the URL and whether it changed it.
+//
+// Without this the bot would see whatever default order Zonaprop chooses, and the
+// silent baseline would mark an arbitrary slice of the inventory as seen.
+func InjectRecentSort(raw string) (string, bool, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return raw, false, fmt.Errorf("invalid url %q: %w", raw, err)
+	}
+	base := strings.TrimSuffix(u.Path, "/")
+	if strings.HasSuffix(base, recentSortSuffix) {
+		return raw, false, nil
+	}
+	// The suffix is inserted before the .html extension.
+	if strings.HasSuffix(base, ".html") {
+		base = strings.TrimSuffix(base, ".html") + recentSortSuffix + ".html"
+	} else {
+		base += recentSortSuffix
+	}
+	u.Path = base
+	return u.String(), true, nil
+}

@@ -22,6 +22,7 @@ import (
 	"zonapropbot/internal/scheduler"
 	"zonapropbot/internal/score"
 	"zonapropbot/internal/telegram"
+	"zonapropbot/internal/validate"
 )
 
 // pollerHolder identifies this process for the Telegram poll lease.
@@ -76,6 +77,8 @@ func main() {
 		log.Fatalf("seed: %v", err)
 	}
 
+	rp := repo.New(pool)
+
 	fc := fetch.New(cfg)
 	nt := telegram.New(cfg, imageDownloader{fc}, os.Stdout)
 	runner := &digest.Runner{
@@ -91,7 +94,6 @@ func main() {
 
 	// Retrain each active user's model from their ratings. V4.2 turns this into a
 	// nightly job; doing it at startup keeps the model fresh until then.
-	rp := repo.New(pool)
 	activeUsers, err := rp.ListActiveUsers(ctx)
 	if err != nil {
 		log.Fatalf("list active users: %v", err)
@@ -104,6 +106,25 @@ func main() {
 		}
 		logger.Printf("retrain user %d: model v%d", u.UserID, version)
 	}
+
+	// The deep validator checks new searches every ten minutes. It runs alongside
+	// everything else: it is the only path that can move a search from "pending" to
+	// "watched", so it must not depend on the daily digest.
+	validator := &validate.Validator{Repo: rp, Fetcher: fc, Notifier: nt, Logger: logger}
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if _, err := validator.RunOnce(ctx); err != nil && ctx.Err() == nil {
+					logger.Printf("validate: %v", err)
+				}
+			}
+		}
+	}()
 
 	// The poller runs alongside the digest loop: one consumes updates, the other
 	// produces deliveries. They share the process but not their state.

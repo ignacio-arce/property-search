@@ -244,3 +244,264 @@ func TestModelCommandRepliesWithCounts(t *testing.T) {
 		t.Errorf("expected the model report, got %v", api.texts)
 	}
 }
+
+const testSearchURL = "https://www.zonaprop.com.ar/departamentos-venta-gba-norte-3-ambientes.html"
+
+func message(text string, userID, chatID int64) *telegram.Message {
+	return &telegram.Message{
+		From: &telegram.User{ID: userID},
+		Chat: &telegram.Chat{ID: chatID, Type: "private"},
+		Text: text,
+	}
+}
+
+func TestOnboardingRegistersASearchAndInjectsRecencyOrder(t *testing.T) {
+	p, api, r, _ := newTestPoller(t)
+	ctx := context.Background()
+
+	if err := p.handleMessage(ctx, message("/start", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message(testSearchURL, 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message("San Isidro 3amb", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+
+	searches, err := r.ListSearchURLs(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(searches) != 1 {
+		t.Fatalf("registered %d searches, want 1", len(searches))
+	}
+	if searches[0].Label != "San Isidro 3amb" {
+		t.Errorf("label = %q", searches[0].Label)
+	}
+	// The recency order is what makes the newest listings the ones that show up.
+	if !strings.Contains(searches[0].URL, "-orden-publicado-descendente") {
+		t.Errorf("url = %q, want the recency order injected", searches[0].URL)
+	}
+	if searches[0].ValidationStatus != "pending" {
+		t.Errorf("status = %q, want pending until the deep check runs", searches[0].ValidationStatus)
+	}
+
+	user, err := r.GetUser(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.State != stateReady {
+		t.Errorf("state = %q, want ready", user.State)
+	}
+
+	// The confirmation must be honest about activation and coverage.
+	last := api.texts[len(api.texts)-1]
+	if !strings.Contains(last, "no empiezan hasta que te habilite") {
+		t.Errorf("confirmation must mention activation: %q", last)
+	}
+	if !strings.Contains(last, "primera página") {
+		t.Errorf("confirmation must mention the coverage limit: %q", last)
+	}
+}
+
+func TestOnboardingRejectsNonZonapropURL(t *testing.T) {
+	p, _, r, _ := newTestPoller(t)
+	ctx := context.Background()
+	if err := p.handleMessage(ctx, message("/start", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	// A substring host check would accept this one.
+	for _, bad := range []string{
+		"https://zonaprop.com.ar.attacker.test/x.html",
+		"https://notzonaprop.com.ar/x.html",
+		"http://www.zonaprop.com.ar/x.html",
+	} {
+		if err := p.handleMessage(ctx, message(bad, 7, 7)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	searches, err := r.ListSearchURLs(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(searches) != 0 {
+		t.Errorf("a non-Zonaprop or http URL was accepted: %+v", searches)
+	}
+}
+
+func TestOnboardingDuplicateLabelReprompts(t *testing.T) {
+	p, api, r, _ := newTestPoller(t)
+	ctx := context.Background()
+
+	// Two different searches cannot share a label.
+	if err := p.handleMessage(ctx, message("/addurl", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message(testSearchURL, 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message("repetido", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := p.handleMessage(ctx, message("/addurl", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message(testSearchURL+"-otra.html", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message("repetido", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+
+	last := api.texts[len(api.texts)-1]
+	if !strings.Contains(last, "Ya usaste ese nombre") {
+		t.Errorf("a duplicate label must be re-prompted, got %q", last)
+	}
+
+	// Still in the label step, so the user can simply answer with another name.
+	user, err := r.GetUser(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.State != stateAwaitLabel {
+		t.Errorf("state = %q, want await_label so the user can retry", user.State)
+	}
+	if err := p.handleMessage(ctx, message("otro nombre", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+
+	searches, err := r.ListSearchURLs(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(searches) != 2 {
+		t.Fatalf("got %d searches, want 2", len(searches))
+	}
+}
+
+// The same search pasted from another page must not register twice: the tracking
+// parameters differ but the normalized form is the same.
+func TestOnboardingDeduplicatesOnNormalizedURL(t *testing.T) {
+	p, _, r, _ := newTestPoller(t)
+	ctx := context.Background()
+
+	for _, url := range []string{testSearchURL, testSearchURL + "?n_pg=2&n_pos=9"} {
+		if err := p.handleMessage(ctx, message("/addurl", 7, 7)); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.handleMessage(ctx, message(url, 7, 7)); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.handleMessage(ctx, message("misma busqueda", 7, 7)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	searches, err := r.ListSearchURLs(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(searches) != 1 {
+		t.Errorf("got %d searches, want 1 after normalization dedup: %+v", len(searches), searches)
+	}
+}
+
+func TestOnboardingEnforcesTheSearchCap(t *testing.T) {
+	p, api, r, _ := newTestPoller(t)
+	ctx := context.Background()
+
+	for i := 0; i < repo.MaxSearchURLsPerUser+1; i++ {
+		if err := p.handleMessage(ctx, message("/addurl", 7, 7)); err != nil {
+			t.Fatal(err)
+		}
+		url := fmt.Sprintf("https://www.zonaprop.com.ar/busqueda-%d.html", i)
+		if err := p.handleMessage(ctx, message(url, 7, 7)); err != nil {
+			t.Fatal(err)
+		}
+		if err := p.handleMessage(ctx, message(fmt.Sprintf("busqueda %d", i), 7, 7)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	searches, err := r.ListSearchURLs(ctx, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(searches) != repo.MaxSearchURLsPerUser {
+		t.Fatalf("registered %d searches, want the cap of %d", len(searches), repo.MaxSearchURLsPerUser)
+	}
+	joined := strings.Join(api.texts, "\n")
+	if !strings.Contains(joined, "máximo") {
+		t.Errorf("the user should be told about the cap: %v", api.texts)
+	}
+}
+
+func TestListShowsStatusAndLabels(t *testing.T) {
+	p, api, r, pool := newTestPoller(t)
+	ctx := context.Background()
+	if err := p.handleMessage(ctx, message("/start", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message(testSearchURL, 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message("mi busqueda", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	searches, _ := r.ListSearchURLs(ctx, 7)
+	if _, err := pool.Exec(ctx, `UPDATE search_urls SET validation_status = 'valid' WHERE id = $1`, searches[0].ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := p.handleMessage(ctx, message("/list", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	last := api.texts[len(api.texts)-1]
+	if !strings.Contains(last, "mi busqueda") || !strings.Contains(last, "vigilando") {
+		t.Errorf("/list output = %q", last)
+	}
+}
+
+func TestStopAndBorrardatos(t *testing.T) {
+	p, _, r, _ := newTestPoller(t)
+	ctx := context.Background()
+	if err := p.handleMessage(ctx, message("/start", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message(testSearchURL, 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.handleMessage(ctx, message("x", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := p.handleMessage(ctx, message("/stop", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	user, _ := r.GetUser(ctx, 7)
+	if user.State != stateStopped {
+		t.Errorf("state = %q, want stopped", user.State)
+	}
+
+	if err := p.handleMessage(ctx, message("/borrardatos", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := r.GetUser(ctx, 7)
+	if after != nil {
+		t.Error("the user should be gone after /borrardatos")
+	}
+}
+
+func TestRemoveURLNeedsAKnownLabel(t *testing.T) {
+	p, api, _, _ := newTestPoller(t)
+	ctx := context.Background()
+	if err := p.handleMessage(ctx, message("/rmurl noexiste", 7, 7)); err != nil {
+		t.Fatal(err)
+	}
+	last := api.texts[len(api.texts)-1]
+	if !strings.Contains(last, "No encontré") {
+		t.Errorf("removing an unknown label should say so, got %q", last)
+	}
+}

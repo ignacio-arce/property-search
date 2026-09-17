@@ -92,6 +92,9 @@ type Options struct {
 	// thumbs-up) and for the operator's own searches, so they are not queued
 	// behind a bulk digest.
 	Priority bool
+	// NoRetries disables the inner retry loop. Validation uses it: five attempts
+	// times four inner retries is twenty hits on a challenge page from a shared IP.
+	NoRetries bool
 }
 
 // Client fetches documents from a target site, resolving Cloudflare with
@@ -153,6 +156,9 @@ func (c *Client) FetchWith(ctx context.Context, u string, opts Options) (*Result
 	}
 
 	maxAttempts := c.cfg.FetchRetries + 1
+	if opts.NoRetries {
+		maxAttempts = 1
+	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if attempt > 1 {
 			if err := sleepWithContext(ctx, backoff(attempt)); err != nil {

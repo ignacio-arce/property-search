@@ -236,15 +236,32 @@ func (p *Poller) handleMessage(ctx context.Context, msg *telegram.Message) error
 	}
 
 	switch command[0] {
-	case "/start", "/help":
+	case "/start":
+		return p.startOnboarding(ctx, msg.From.ID, msg.Chat.ID)
+	case "/help":
 		return p.API.SendText(ctx, chatID, helpText())
 	case "/model":
 		return p.handleModel(ctx, msg.From.ID, chatID)
+	case "/list":
+		return p.listSearches(ctx, msg.From.ID, chatID)
+	case "/addurl":
+		return p.addURL(ctx, msg.From.ID, msg.Chat.ID, chatID)
+	case "/rmurl":
+		label := ""
+		if len(command) > 1 {
+			label = strings.Join(command[1:], " ")
+		}
+		return p.removeURL(ctx, msg.From.ID, chatID, label)
+	case "/stop":
+		return p.setStopped(ctx, msg.From.ID, chatID, true)
+	case "/borrardatos":
+		return p.deleteEverything(ctx, msg.From.ID, chatID)
 	default:
 		if strings.HasPrefix(command[0], "/") {
-			return p.API.SendText(ctx, chatID, "Todavía no conozco ese comando. Probá con /help.")
+			return p.API.SendText(ctx, chatID, "No conozco ese comando. Probá con /help.")
 		}
-		return nil
+		// A plain message is part of the onboarding conversation.
+		return p.handleConversationInput(ctx, msg.From.ID, msg.Chat.ID, msg.Text)
 	}
 }
 
@@ -286,10 +303,14 @@ func helpText() string {
 		"El link va siempre en la tarjeta; el 👍 además busca el teléfono del aviso.",
 		"",
 		"Comandos:",
+		"/start — darte de alta o reanudar las notificaciones",
+		"/addurl — sumar otra búsqueda",
+		"/rmurl <nombre> — borrar una búsqueda",
+		"/list — ver tus búsquedas y su estado",
 		"/model — qué aprendió de tus calificaciones",
+		"/stop — pausar las notificaciones",
+		"/borrardatos — borrar todo lo tuyo",
 		"/help — este mensaje",
-		"",
-		"El onboarding con tus búsquedas llega en la próxima versión.",
 	}, "\n")
 }
 

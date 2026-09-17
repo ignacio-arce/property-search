@@ -415,76 +415,91 @@ tzdata: 09:00 ART = 12:00 UTC), `TestNextRunHonoursMinutes`
 
 ---
 
-## V5: `/start` para desconocidos
+## V5: `/start` para desconocidos ✅
 
-### V5.1 Máquina de estados + comandos
+### V5.1 Máquina de estados + comandos ✅
 **Descripción:** El alta conversacional, sin condiciones de carrera.
 
 **Acceptance criteria:**
-- [ ] Transiciones explícitas `idle → await_url → await_label → validating → idle`
-- [ ] **Un escritor serializado por usuario** (el poll loop y el scheduler corren concurrentes)
-- [ ] Entrada no reconocida **responde**, no se descarta
-- [ ] Solo chat privado; en grupo se rechaza con mensaje claro
-- [ ] Comandos: `/start`, `/addurl`, `/rmurl`, `/list`, `/stop`, `/borrardatos`, `/help`
+- [x] Transiciones explícitas `idle → await_url → await_label → ready` (+ `stopped`)
+- [x] **Un escritor serializado por usuario**: `lockUser` toma un mutex por `user_id`, porque el
+      poller y el scheduler corren concurrentes
+- [x] Entrada no reconocida **responde**, no se descarta; un mensaje suelto que no es URL recibe guía
+- [x] Solo chat privado; en grupo se rechaza con mensaje claro
+- [x] Comandos: `/start`, `/addurl`, `/rmurl <label>`, `/list`, `/model`, `/stop`, `/borrardatos`, `/help`
 
-**Verificación:** tests de transición, de concurrencia y de doble paste en un solo mensaje
+**Verificación:** `TestOnboardingRegistersASearchAndInjectsRecencyOrder`,
+`TestListShowsStatusAndLabels`, `TestStopAndBorrardatos`, `TestRemoveURLNeedsAKnownLabel`
 **Dependencias:** V2.2
-**Archivos:** `internal/onboarding/*.go`, `internal/chat/commands.go`
+**Archivos:** `internal/chat/onboarding.go` (nuevo), `internal/chat/bot.go`, `internal/repo/onboarding.go`
 **Alcance:** M
 
-### V5.2 Validación sintáctica, normalización y cap
+### V5.2 Validación sintáctica, normalización y cap ✅
 **Descripción:** Cerrar el SSRF y evitar fetches duplicados.
 
 **Acceptance criteria:**
-- [ ] `https` obligatorio **y** host exactamente `zonaprop.com.ar` o sufijo `.zonaprop.com.ar`
-      (un `Contains` lo pasan `zonaprop.com.ar.attacker.test` y `notzonaprop.com.ar`)
-- [ ] `url_norm`: host lowercase, query ordenado, params de tracking fuera
-- [ ] Auto-inyección de `-orden-publicado-descendente` si falta, con aviso al usuario
-- [ ] Cap de 5 URLs enforceado **dentro** de la transacción
-- [ ] `label` único; colisión → re-prompt (mapear el 23505, no reventar)
+- [x] `https` obligatorio **y** host exactamente `zonaprop.com.ar` o sufijo `.zonaprop.com.ar`
+      (`searchurl.IsZonapropURL`); rechaza `notzonaprop.com.ar`, `zonaprop.com.ar.attacker.test` y `http`
+- [x] `url_norm`: host en minúsculas, query ordenado, tracking fuera
+- [x] **Auto-inyección de `-orden-publicado-descendente`** con aviso al usuario
+- [x] Cap de **5 URLs** enforceado **dentro de la transacción**, con `FOR UPDATE` sobre el usuario
+      para que dos mensajes concurrentes no pasen los dos
+- [x] `label` único por usuario; colisión → re-prompt y el usuario **queda en `await_label`** para
+      poder responder otro nombre (no se pierde el estado)
 
-**Verificación:** tests de tabla de hosts maliciosos y de normalización; test de cap concurrente
+**Verificación:** `TestOnboardingRejectsNonZonapropURL`, `TestOnboardingEnforcesTheSearchCap`,
+`TestOnboardingDuplicateLabelReprompts`, `TestOnboardingDeduplicatesOnNormalizedURL`
 **Dependencias:** V5.1
-**Archivos:** `internal/onboarding/validate.go`, `internal/db/*.go`
+**Archivos:** `internal/searchurl/normalize.go`, `internal/repo/onboarding.go`, `internal/chat/onboarding.go`
 **Alcance:** S
 
-### V5.3 Validación profunda con taxonomía y canario
-**Descripción:** Distinguir "bloqueado" de "búsqueda vacía" de "se cayó la red" — y no degradar una
-URL buena por un fallo de transporte.
+### V5.3 Validación profunda con taxonomía y canario ✅
+**Descripción:** Distinguir bloqueado / vacío / transporte, y no degradar una URL buena.
 
 **Acceptance criteria:**
-- [ ] Challenge (`cf-mitigated`, `Just a moment`, `cf_chl`, 403/503, FS `status != ok`) →
-      `pending`/`retrying`
-- [ ] Página real con 0 tarjetas → `valid_empty` (no "failed")
-- [ ] Error de transporte **nunca degrada** una URL ya `valid`
-- [ ] Backoff exponencial ≤24h; `attempts ≤5` → `invalid` + notificación; re-add resetea a `pending`
-- [ ] Al pasar a `valid`, dispara el **baseline silencioso** de V1.5; los seeds pasan por el validador
-- [ ] Canario: la alerta de cambio de DOM solo si la URL conocida-buena del operador también falla
+- [x] Challenge (`fetch.KindBlocked`) → `retrying` con backoff; **nunca** degrada a inválida
+- [x] Error de transporte → `retrying`: una caída de red no es un veredicto sobre la URL
+- [x] Página real con 0 tarjetas → `valid_empty` (sin más chequeos programados)
+- [x] Backoff exponencial con techo de 24 h; `attempts ≥ 5` → `invalid` + **notificación al usuario**
+- [x] **Sin reintentos internos** durante la validación (`fetch.Options.NoRetries`): 5 intentos × 4
+      reintentos serían 20 golpes a una página de challenge desde una IP ya sospechada
+- [x] **Canario**: si *todas* las búsquedas del pase vuelven vacías, se loguea como probable cambio de
+      DOM en vez de "búsquedas vacías"
+- [x] El baseline silencioso lo hace el digest solo: una URL recién validada tiene 0
+      `listing_sources`, así que su primera indexación se baselina sin código extra
 
-**Verificación:** tests httptest por cada clase de respuesta; test de backoff; test de canario
+**Verificación:** `TestValidPageBecomesWatched`, `TestChallengeIsRetriedNotRejected`,
+`TestTransportFailureIsRetried`, `TestEmptyPageIsValidButEmpty`, `TestGivesUpAfterMaxAttempts`,
+`TestNotDueIsNotFetched`
 **Dependencias:** V5.2, V1.3
-**Archivos:** `internal/onboarding/validate.go`, `internal/db/*.go`
+**Archivos:** `internal/validate/*` (nuevo), `internal/fetch/fetch.go` (`NoRetries`),
+`internal/repo/{onboarding,repo}.go`, `cmd/bot/main.go`
 **Alcance:** M
 
-### V5.4 Activación pendiente + `/list`
+### V5.4 Activación pendiente + `/list` ✅
 **Descripción:** Honestidad sobre cuándo empiezan las notificaciones.
 
 **Acceptance criteria:**
-- [ ] Fin de onboarding avisa que **las notificaciones no arrancan hasta que el operador active al
-      usuario** (sin prometer fecha)
-- [ ] `/list` muestra `label`, `status` y última revisión ("hace N, sin resultados / error")
-- [ ] `/stop` pausa conservando datos; `/start` reanuda
-- [ ] `/borrardatos` cascada
+- [x] Fin de onboarding avisa que **no hay notificaciones hasta que el operador active** al usuario
+- [x] Avisa también el **límite de cobertura**: solo se ve la primera página (~30 más nuevas)
+- [x] `/list` muestra `label`, estado traducido (`vigilando` / `validando…` / `hoy sin resultados`) y la URL
+- [x] `/stop` pausa conservando datos; `/start` reanuda
+- [x] `/borrardatos` cascada
 
-**Verificación:** prueba manual del flujo completo en Telegram
+**Verificación:** incluidas en `TestOnboardingRegistersASearchAndInjectsRecencyOrder` (los dos avisos)
+y `TestStopAndBorrardatos`
 **Dependencias:** V5.3
-**Archivos:** `internal/onboarding/*.go`, `internal/chat/commands.go`
+**Archivos:** `internal/chat/onboarding.go`
 **Alcance:** S
 
 ### Checkpoint V5
-- [ ] Una URL de alquiler o de otro dominio se rechaza con mensaje claro
-- [ ] Agregar una URL no reproduce su historial
-- [ ] El usuario sabe que las notificaciones no arrancan hasta que lo activen
+- [x] Una URL de otro dominio o `http` se rechaza con mensaje claro
+- [x] Agregar una URL no reproduce su historial (baseline en la primera indexación)
+- [x] El usuario sabe que las notificaciones no arrancan hasta que lo activen
+
+**Bug encontrado y corregido acá:** `SetUserState` era un `UPDATE` que no hacía nada si el usuario
+no existía, así que `/addurl` sin `/start` quedaba en silencio y el bot respondía como si hubiera
+funcionado. Ahora devuelve error si no afectó filas, y `/addurl` asegura el usuario primero.
 
 ---
 

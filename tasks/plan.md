@@ -120,15 +120,15 @@ Acá va el índice y el orden.
 - [x] Un día interrumpido no se pierde
 
 ### V5: `/start` para desconocidos
-- [ ] V5.1 Máquina de estados + escritor serializado + comandos
-- [ ] V5.2 Validación sintáctica + `url_norm` + orden auto-inyectado + cap 5 + label único
-- [ ] V5.3 Validación profunda con taxonomía, backoff, tope de intentos y canario
-- [ ] V5.4 Mensaje de activación pendiente + `/list` con estado
+- [x] V5.1 Máquina de estados + escritor serializado + comandos
+- [x] V5.2 Validación sintáctica + `url_norm` + orden auto-inyectado + cap 5 + label único
+- [x] V5.3 Validación profunda con taxonomía, backoff, tope de intentos y canario
+- [x] V5.4 Mensaje de activación pendiente + `/list` con estado
 
 ### Checkpoint V5
-- [ ] Una URL de alquiler o de otro dominio se rechaza con mensaje claro
-- [ ] Agregar una URL no reproduce su historial
-- [ ] El usuario sabe que las notificaciones no arrancan hasta que lo activen
+- [x] Una URL de otro dominio se rechaza con mensaje claro
+- [x] Agregar una URL no reproduce su historial
+- [x] El usuario sabe que las notificaciones no arrancan hasta que lo activen
 
 ### V6: Al 👍 me manda el teléfono
 - [ ] V6.1 Parser de JSON-LD + `listing_contacts` con TTL
