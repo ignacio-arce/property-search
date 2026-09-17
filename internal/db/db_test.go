@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -222,4 +224,58 @@ func TestSeedDoesNotResurrectADeletedUser(t *testing.T) {
 	}
 
 	assertCount(t, pool, "users", 0)
+}
+
+// Open exists to absorb the compose healthcheck race, so its retry behaviour is
+// the feature, not an implementation detail.
+func TestOpenSucceedsAgainstAReachableDatabase(t *testing.T) {
+	pool := dbtest.NewPool(t)
+	ctx := context.Background()
+
+	// dbtest already connected, so this exercises the success path through Open.
+	got, err := Open(ctx, "postgres://"+userInfo(pool)+"", Options{ConnectTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer got.Close()
+	if err := got.Ping(ctx); err != nil {
+		t.Errorf("returned pool does not answer: %v", err)
+	}
+}
+
+func TestOpenRetriesThenFailsWithAClearError(t *testing.T) {
+	start := time.Now()
+	// Nothing listens on this port, so every attempt is refused.
+	_, err := Open(context.Background(),
+		"postgres://u:p@127.0.0.1:1/db",
+		Options{ConnectTimeout: 400 * time.Millisecond})
+	if err == nil {
+		t.Fatal("expected an error for an unreachable database")
+	}
+	if !strings.Contains(err.Error(), "unreachable") {
+		t.Errorf("error should say the database was unreachable, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < 300*time.Millisecond {
+		t.Errorf("gave up after %v, want it to retry until the timeout", elapsed)
+	}
+}
+
+// A cancelled context must abort the retry loop instead of holding shutdown.
+func TestOpenStopsOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	const timeout = time.Hour
+	start := time.Now()
+	_, err := Open(ctx, "postgres://u:p@127.0.0.1:1/db", Options{ConnectTimeout: timeout})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("waited %v with a cancelled context, want a prompt return", elapsed)
+	}
+}
+
+func userInfo(pool *pgxpool.Pool) string {
+	return pool.Config().ConnString()[len("postgres://"):]
 }

@@ -334,6 +334,9 @@ func TestClassifyFlareSolverrFailure(t *testing.T) {
 		{"Error solving the challenge. Timeout after 60.0 seconds.", KindBlocked},
 		{"Error solving the challenge. Message: unknown error: net::ERR_CONNECTION_REFUSED", KindTransport},
 		{"Error solving the challenge. Message: unknown error: net::ERR_NAME_NOT_RESOLVED", KindTransport},
+		// A bare timeout has no challenge marker: a slow page must not trigger the
+		// cooldown and must not stop the TLS fallback.
+		{"Timeout after 60.0 seconds", KindHTTPStatus},
 		{"something else entirely", KindHTTPStatus},
 	}
 	for _, tc := range cases {

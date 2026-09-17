@@ -1,5 +1,8 @@
 .NAME := property-search
-SHELL := /bin/bash
+
+# Do not hardcode /bin/bash: on NixOS that path does not exist and every target
+# dies with "No existe el fichero o el directorio". Resolve bash from PATH.
+SHELL := bash
 
 .PHONY: fmt vet test build probe run up down logs image
 

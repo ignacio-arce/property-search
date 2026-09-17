@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -134,11 +135,13 @@ func (n *Notifier) postForm(ctx context.Context, method string, form url.Values)
 		fmt.Fprintf(n.out, "DRY-RUN %s: %s\n", method, form.Encode())
 		return nil
 	}
+	// Parameters go in the body, not the query string, so every POST in this
+	// package has the same shape (sendMessage already did).
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		fmt.Sprintf("%s/bot%s/%s", n.apiBase, n.token, method), nil)
+		fmt.Sprintf("%s/bot%s/%s", n.apiBase, n.token, method), strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
-	req.URL.RawQuery = form.Encode()
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return n.post(req)
 }

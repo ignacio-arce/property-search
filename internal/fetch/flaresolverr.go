@@ -124,7 +124,11 @@ func classifyFlareSolverrFailure(message string) ErrorKind {
 			return KindTransport
 		}
 	}
-	if strings.Contains(lower, "challenge") || strings.Contains(lower, "timeout after") {
+	// Only an explicit challenge counts. A bare timeout is more likely a slow page
+	// than a Cloudflare block, and treating it as blocked would apply the gate
+	// cooldown — and stop the retries — for a problem that is not a block. It stays
+	// KindHTTPStatus so the TLS fallback still gets a shot.
+	if strings.Contains(lower, "challenge") {
 		return KindBlocked
 	}
 	return KindHTTPStatus
