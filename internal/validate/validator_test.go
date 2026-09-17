@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,7 +176,7 @@ func TestGivesUpAfterMaxAttempts(t *testing.T) {
 		t.Errorf("status = %q, want invalid after the attempt budget", status)
 	}
 	last := notifier.texts[len(notifier.texts)-1]
-	if !contains(last, "No pude validar") {
+	if !strings.Contains(last, "No pude validar") {
 		t.Errorf("the user should be told, got %q", last)
 	}
 }
@@ -196,15 +197,4 @@ func TestNotDueIsNotFetched(t *testing.T) {
 	if fetcher.calls != 0 {
 		t.Errorf("a search whose backoff has not elapsed was fetched %d times", fetcher.calls)
 	}
-}
-
-func contains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && (func() bool {
-		for i := 0; i+len(needle) <= len(haystack); i++ {
-			if haystack[i:i+len(needle)] == needle {
-				return true
-			}
-		}
-		return false
-	})()
 }

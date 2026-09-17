@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"zonapropbot/internal/config"
@@ -190,7 +191,7 @@ func TestSendTextAndDryRun(t *testing.T) {
 	if err := dry.SendText(context.Background(), "-1", "hola"); err != nil {
 		t.Fatalf("dry-run SendText: %v", err)
 	}
-	if !contains(out.String(), "hola") {
+	if !strings.Contains(out.String(), "hola") {
 		t.Errorf("dry-run output = %q", out.String())
 	}
 }
@@ -199,12 +200,3 @@ type stringWriter struct{ b []byte }
 
 func (w *stringWriter) Write(p []byte) (int, error) { w.b = append(w.b, p...); return len(p), nil }
 func (w *stringWriter) String() string              { return string(w.b) }
-
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
-}

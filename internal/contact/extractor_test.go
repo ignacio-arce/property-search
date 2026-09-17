@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,7 +74,7 @@ func TestOnLikeSendsThePhoneFromTheDetailPage(t *testing.T) {
 	if len(notifier.texts) != 1 {
 		t.Fatalf("texts = %v, want the phone", notifier.texts)
 	}
-	if !contains(notifier.texts[0], "5491100000000") {
+	if !strings.Contains(notifier.texts[0], "5491100000000") {
 		t.Errorf("message = %q", notifier.texts[0])
 	}
 }
@@ -127,13 +128,4 @@ func TestOnLikeSurvivesADetailFetchFailure(t *testing.T) {
 	if len(notifier.texts) != 0 {
 		t.Errorf("nothing should be sent, got %v", notifier.texts)
 	}
-}
-
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }

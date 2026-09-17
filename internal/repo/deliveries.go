@@ -81,22 +81,3 @@ func (r *Repo) BaselineDeliveries(ctx context.Context, userID int64, listingIDs 
 	}
 	return inserted, nil
 }
-
-// UndeliveredLinkedToListing counts the user's linked, not-yet-delivered
-// listings. Used by the baseline to decide whether a search has already been
-// baselined.
-func (r *Repo) UndeliveredLinkedToListing(ctx context.Context, userID, searchURLID int64) (int, error) {
-	var n int
-	err := r.pool.QueryRow(ctx,
-		`SELECT count(*)
-		   FROM listing_sources s
-		  WHERE s.search_url_id = $1
-		    AND NOT EXISTS (
-		          SELECT 1 FROM deliveries d
-		           WHERE d.listing_id = s.listing_id AND d.user_id = $2)`,
-		searchURLID, userID).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("repo: count undelivered for search %d: %w", searchURLID, err)
-	}
-	return n, nil
-}

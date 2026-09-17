@@ -7,11 +7,11 @@ import (
 	"strings"
 )
 
-// ZonapropHost is the only host allowed to be fetched. Matching is on the exact
+// zonapropHost is the only host allowed to be fetched. Matching is on the exact
 // host or a dot-suffixed subdomain, never on a substring: a substring check lets
 // "zonaprop.com.ar.attacker.test" through, and the deep validation would then
 // load that URL in a real browser on the operator's LAN.
-const ZonapropHost = "zonaprop.com.ar"
+const zonapropHost = "zonaprop.com.ar"
 
 // trackingParams are dropped from the canonical form. Zonaprop appends them to
 // every card link and to some search URLs; they vary per page and per position,
@@ -34,7 +34,7 @@ func IsZonapropURL(raw string) bool {
 	if u.Scheme != "https" {
 		return false
 	}
-	return host == ZonapropHost || strings.HasSuffix(host, "."+ZonapropHost)
+	return host == zonapropHost || strings.HasSuffix(host, "."+zonapropHost)
 }
 
 // Normalize returns the canonical form of a search URL: lowercased scheme and

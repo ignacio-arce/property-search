@@ -57,17 +57,6 @@ func (r *Repo) RecordRating(ctx context.Context, userID, listingID int64, label 
 	return nil
 }
 
-// ListingTitle returns a listing's title, used to label command output.
-func (r *Repo) ListingTitle(ctx context.Context, listingID int64) (string, error) {
-	var title string
-	err := r.pool.QueryRow(ctx,
-		`SELECT coalesce(features->>'title', '') FROM listings WHERE id = $1`, listingID).Scan(&title)
-	if err != nil {
-		return "", fmt.Errorf("repo: title of listing %d: %w", listingID, err)
-	}
-	return title, nil
-}
-
 // RatingCounts returns how many 👍 and 👎 the user has recorded. Until the model
 // exists (V3) this is the only honest thing to show about what has been learned.
 func (r *Repo) RatingCounts(ctx context.Context, userID int64) (likes, dislikes int, err error) {

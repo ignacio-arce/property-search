@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -47,14 +48,14 @@ func (r *Repo) GetUser(ctx context.Context, userID int64) (*UserState, error) {
 		return nil, fmt.Errorf("repo: get user %d: %w", userID, err)
 	}
 	if len(data) > 0 {
-		_ = jsonUnmarshal(data, &u.StateData)
+		_ = json.Unmarshal(data, &u.StateData)
 	}
 	return &u, nil
 }
 
 // SetUserState persists the onboarding state and its scratch data.
 func (r *Repo) SetUserState(ctx context.Context, userID int64, state string, data map[string]string) error {
-	encoded, err := jsonMarshal(data)
+	encoded, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("repo: encode state data: %w", err)
 	}

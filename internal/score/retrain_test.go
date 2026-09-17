@@ -3,6 +3,7 @@ package score
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,31 +153,13 @@ func TestAgreementNeedsEnoughSamples(t *testing.T) {
 }
 
 func TestSummaryTextIsHonestAboutWhatIsKnown(t *testing.T) {
-	if got := SummaryText(0, 0, 0, 0, 0, false); !containsAll(got, "Todavía no tengo calificaciones") {
+	if got := SummaryText(0, 0, 0, 0, 0, false); !strings.Contains(got, "Todavía no tengo calificaciones") {
 		t.Errorf("empty model text = %q", got)
 	}
-	if got := SummaryText(0, 3, 1, 0, 4, false); !containsAll(got, "4 de 30") {
+	if got := SummaryText(0, 3, 1, 0, 4, false); !strings.Contains(got, "4 de 30") {
 		t.Errorf("should say how far it is from a measurable agreement: %q", got)
 	}
-	if got := SummaryText(4, 40, 10, 0.75, 50, true); !containsAll(got, "75%") {
+	if got := SummaryText(4, 40, 10, 0.75, 50, true); !strings.Contains(got, "75%") {
 		t.Errorf("should report the agreement: %q", got)
 	}
-}
-
-func containsAll(haystack string, needles ...string) bool {
-	for _, n := range needles {
-		if !contains(haystack, n) {
-			return false
-		}
-	}
-	return true
-}
-
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }
