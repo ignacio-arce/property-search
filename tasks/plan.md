@@ -139,10 +139,10 @@ Acá va el índice y el orden.
 - [x] Un fallo de challenge no deja al usuario sin nada
 
 ### V7: Preparación de deploy y cierre
-- [ ] V7.1 Compose final
-- [ ] V7.2 `.dockerignore`, Dockerfile, runbook
-- [ ] V7.3 `internal/config` final + código muerto (`internal/store`, `cmd/probe`, `internal/bot`)
-- [ ] V7.4 Docs y toolchain (README, `.env.example`, Makefile, flake)
+- [x] V7.1 Compose final
+- [x] V7.2 `.dockerignore`, Dockerfile, runbook
+- [x] V7.3 `internal/config` final + código muerto (`internal/store`, `cmd/probe`, `internal/bot`)
+- [x] V7.4 Docs y toolchain (README, `.env.example`, Makefile, flake)
 
 > **El despliegue real en la RPi 5 queda FUERA de este plan** (decisión del usuario). V7 deja todo
 > **listo para desplegar**: compose validado con `docker compose config`, imagen que buildea, runbook
@@ -150,9 +150,9 @@ Acá va el índice y el orden.
 > confirmar la alerta real — se planifica aparte, cuando haya acceso al host.
 
 ### Checkpoint: Completo
-- [ ] `go test ./...` verde y `docker compose config` válido
-- [ ] La imagen buildea y el runbook está escrito y revisado
-- [ ] **Listo para desplegar**: el deploy en el Pi es un plan aparte, no este
+- [x] `go test ./...` verde y `docker compose config` válido
+- [x] La imagen buildea y el runbook está escrito y revisado
+- [x] **Listo para desplegar**: el deploy en el Pi es un plan aparte, no este
 
 ## Dependency Graph
 

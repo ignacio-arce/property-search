@@ -62,7 +62,7 @@ func TestDryRunPrintsWithoutNetwork(t *testing.T) {
 	}))
 	defer server.Close()
 
-	n, out := notifierFor(t, map[string]string{"SEARCH_URLS": "u"}, nil)
+	n, out := notifierFor(t, map[string]string{}, nil)
 	n.apiBase = server.URL
 	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 42, Listing: listing()}); err != nil {
 		t.Fatalf("Notify: %v", err)
@@ -108,7 +108,6 @@ func TestNotifySendsMultipartPhoto(t *testing.T) {
 	defer server.Close()
 
 	n, _ := notifierFor(t, map[string]string{
-		"SEARCH_URLS":        "u",
 		"TELEGRAM_BOT_TOKEN": "123:abc",
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: photoBytes})
@@ -130,7 +129,6 @@ func TestNotifyFallsBackToTextWhenNoPhoto(t *testing.T) {
 	l := listing()
 	l.PhotoURL = ""
 	n, _ := notifierFor(t, map[string]string{
-		"SEARCH_URLS":        "u",
 		"TELEGRAM_BOT_TOKEN": "123:abc",
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, nil)
@@ -150,7 +148,6 @@ func TestNotifyFallsBackToTextWhenImageFetchFails(t *testing.T) {
 	defer server.Close()
 
 	n, _ := notifierFor(t, map[string]string{
-		"SEARCH_URLS":        "u",
 		"TELEGRAM_BOT_TOKEN": "123:abc",
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{err: io.ErrUnexpectedEOF})
@@ -179,7 +176,6 @@ func TestNotifyHonorsRetryAfter(t *testing.T) {
 	defer server.Close()
 
 	n, _ := notifierFor(t, map[string]string{
-		"SEARCH_URLS":        "u",
 		"TELEGRAM_BOT_TOKEN": "123:abc",
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: []byte("img")})
@@ -223,7 +219,6 @@ func TestNotifySendsRatingKeyboard(t *testing.T) {
 	defer server.Close()
 
 	n, _ := notifierFor(t, map[string]string{
-		"SEARCH_URLS":        "u",
 		"TELEGRAM_BOT_TOKEN": "123:abc",
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: []byte("img")})
@@ -283,7 +278,6 @@ func TestPhotoBadRequestFallsBackToText(t *testing.T) {
 	defer server.Close()
 
 	n, _ := notifierFor(t, map[string]string{
-		"SEARCH_URLS":        "u",
 		"TELEGRAM_BOT_TOKEN": "123:abc",
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: []byte("img")})

@@ -57,7 +57,6 @@ func TestFlareSolverrSuccess(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":      target.URL,
 		"FLARESOLVERR_URL": fs.URL,
 		"FETCH_RETRIES":    "0",
 	})
@@ -97,7 +96,6 @@ func TestFlareSolverrIsNotRetried(t *testing.T) {
 	defer fs.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":      "https://target.invalid/x.html",
 		"FLARESOLVERR_URL": fs.URL,
 		"FETCH_RETRIES":    "0",
 	})
@@ -124,7 +122,6 @@ func TestFlareSolverrChallengeStopsImmediately(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":      target.URL,
 		"FLARESOLVERR_URL": fs.URL,
 		"FETCH_RETRIES":    "3",
 	})
@@ -153,7 +150,6 @@ func TestFlareSolverrFallsBackToTLS(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":      target.URL,
 		"FLARESOLVERR_URL": fs.URL,
 		"FETCH_RETRIES":    "1",
 	})
@@ -182,7 +178,6 @@ func TestTLSRetriesOnStatus403(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":   target.URL,
 		"FETCH_RETRIES": "3",
 	})
 	c := New(cfg)
@@ -205,7 +200,6 @@ func TestTLSExhaustsRetries(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":   target.URL,
 		"FETCH_RETRIES": "1",
 	})
 	c := New(cfg)
@@ -249,7 +243,6 @@ func TestTLSThroughProxy(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":    target.URL,
 		"ZONAPROP_PROXY": proxy.URL,
 		"FETCH_RETRIES":  "0",
 	})
@@ -274,7 +267,6 @@ func TestResultCarriesStatusAndHeader(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":   target.URL,
 		"FETCH_RETRIES": "0",
 	})
 	res, err := New(cfg).Fetch(context.Background(), target.URL)
@@ -300,7 +292,6 @@ func TestForbiddenWithChallengeIsNotRetried(t *testing.T) {
 	defer target.Close()
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":   target.URL,
 		"FETCH_RETRIES": "3",
 	})
 	_, err := New(cfg).Fetch(context.Background(), target.URL)
@@ -321,7 +312,6 @@ func TestTransportErrorIsClassified(t *testing.T) {
 	target.Close() // nothing is listening now
 
 	cfg := cfgFrom(t, map[string]string{
-		"SEARCH_URLS":   url,
 		"FETCH_RETRIES": "0",
 	})
 	_, err := New(cfg).Fetch(context.Background(), url)

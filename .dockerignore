@@ -1,0 +1,14 @@
+# Build context hygiene. Without this, COPY . . bakes .env (Telegram token and the
+# Postgres password) into a build-stage layer and the BuildKit cache, where it is
+# recoverable from the image history even though the final stage is scratch.
+.git
+.env
+data/
+fixtures/
+tasks/
+docs/
+bin/
+result
+.direnv
+*.md
+AGENTS.md

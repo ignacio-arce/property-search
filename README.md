@@ -1,68 +1,150 @@
-# zonaprop-bot
+# property-search
 
-Bot en Go que monitorea búsquedas de **compra** en Zonaprop (zona norte de Buenos Aires) y
-te notifica por **Telegram** cada publicación nueva con tarjeta completa: precio, m², ambientes,
-ubicación, foto y link directo. Metodología equivalente al bot Python de
-[nazarenads/zonaprop-bot](https://github.com/nazarenads/zonaprop-bot) (request + parseo de
-selectors + dedup por `sha1(link)` + loop), pero en Go, con estado persistente y pensado para
-correr como imagen Docker ARM64 en una Raspberry Pi 5.
+Bot de Telegram que vigila búsquedas de **Zonaprop**, manda las publicaciones nuevas todos los días
+y **aprende de tus 👍/👎** para ordenarlas. El modelo predice, no filtra: decidís vos.
 
-## Comportamiento
+Cualquiera puede darse de alta con `/start`, pero **las notificaciones no arrancan hasta que el
+operador habilite al usuario**. Esa es la única barrera, y es deliberada: el presupuesto de requests
+contra Zonaprop es el recurso escaso.
 
-- Cada `CHECK_INTERVAL` (default `60m`) se revisan las URLs de búsqueda configuradas.
-- La **primera corrida notifica todo el inventario** actual (historial vacío).
-- En corridas siguientes sólo se notifican publicaciones nuevas (dedup por `sha1` de la URL).
-- El historial vive en `DATA_DIR/seen.jsonl` (append-only, fsync por alta; tolera un corte).
-- Si una URL falla (403 de Cloudflare, timeout, 5xx), se reintenta con backoff y se sigue con las
-  demás: un fallo no detiene el ciclo.
-- Sin credenciales de Telegram, corre en **dry-run** imprimiendo las alertas por consola.
+## Cómo funciona
 
-## Servicios de red opcionales
+1. **`/start`** te pide la URL de una búsqueda de Zonaprop (la armás con los filtros que quieras y
+   copiás la barra del navegador) y un nombre corto para reconocerla. Hasta 5 búsquedas por usuario.
+2. El bot **valida** la URL: primero el formato (`https` y host de Zonaprop), después fetchea de
+   verdad y confirma que traiga publicaciones.
+3. Cada día a las **09:00** (hora de Buenos Aires) baja tus búsquedas **ordenadas por más recientes**
+   y te manda **todas** las publicaciones que todavía no te mostró, cada una con foto, precio, m²,
+   ambientes, expensas, ubicación, el link directo y botones 👍/👎.
+4. Tus calificaciones reentrenan tu modelo. Las publicaciones se ordenan por lo que aprendió y cada
+   tarjeta muestra su puesto del día (`#2 de 14 hoy`) y hasta dos razones en castellano
+   (`San Isidro: te gustaron 4 de 5`). **Si no hay datos suficientes, no muestra razones ni
+   porcentajes.**
+5. Un **👍** te manda además el **teléfono del aviso**, extraído del detalle. Si no está, no pasa
+   nada: el link ya estaba en la tarjeta.
+6. Con `/model` ves qué aprendió, cuántas calificaciones tiene y qué tan bien viene ordenando.
 
-`FLARESOLVERR_URL` y `ZONAPROP_PROXY` son **opcionales**: sólo se usan si su variable está definida.
+## Estado del despliegue
 
-| Config | Efecto |
-|--------|--------|
-| `FLARESOLVERR_URL` definida | Resuelve el challenge de Cloudflare con FlareSolverr (navegador real). |
-| Sin FS, con `ZONAPROP_PROXY` | Cliente Go con huella TLS de Chrome (equivalente a `cloudscraper`) saliendo por el proxy rotativo; cada reintento abre conexión nueva (nueva IP). |
-| Sin ninguna | Conexión directa con huella TLS de Chrome. |
+Este repositorio deja el stack **listo para desplegar**. **El despliegue en la Raspberry Pi 5 no está
+hecho**: no hay contenedores corriendo en el Pi, ni una alerta real verificada. El runbook de abajo es
+lo que falta ejecutar. Tampoco se verificó una tarjeta llegando a Telegram (no hay token en el entorno
+de desarrollo).
 
-En la práctica Zonaprop acepta la huella TLS de Chrome; el proxy/FlareSolverr ayudan cuando
-Cloudflare marca el IP por exceso de pedidos.
+## Servicios
 
-## Configuración (env vars)
+Tres contenedores en la misma red, más una base y un browser:
 
-Ver `.env.example`. Obligatorias: `SEARCH_URLS` y (para noquear en dry-run) `TELEGRAM_BOT_TOKEN` +
-`TELEGRAM_CHAT_ID`.
+| Servicio | Rol |
+|---|---|
+| `zonaprop-bot` | El bot en Go. Imagen `scratch`, estática, sin CGO. |
+| `flaresolverr` | Resuelve el challenge de Cloudflare con un Chromium real. **Obligatorio**, ver abajo. |
+| `postgres` | Estado: usuarios, búsquedas, publicaciones, entregas, calificaciones y pesos. |
 
-## Despliegue en la Raspberry Pi (Alpine + Docker)
+### Por qué FlareSolverr es obligatorio
+
+Zonaprop responde `403` con `cf-mitigated: challenge`: un challenge que exige ejecutar JavaScript.
+**Ningún cliente HTTP lo pasa, tenga la huella TLS que tenga** — se midió con `curl` y con
+`tls-client` usando el perfil `Chrome_152`, ambos por proxy. La única vía que devolvió tarjetas fue
+FlareSolverr.
+
+### Por qué el presupuesto de fetch es lo primero
+
+Durante las mediciones, Cloudflare escaló **después de ~4 requests en 10 minutos** y la URL que
+funcionaba dejó de resolver. Por eso:
+
+- `FETCH_RATE_LIMIT` (default `60s`) espacia los requests a Zonaprop.
+- `maxTimeout` de FlareSolverr es 60s y **no se reintenta**: cada intento lanza un browser.
+- Un challenge **corta los reintentos** y aplica un enfriamiento de 5 minutos.
+- Solo se pagina lo que existe: la primera página (~30 publicaciones). La paginación server-side **no
+  existe** en las URLs SEO de Zonaprop — `?n_pg=2` devuelve lo mismo.
+
+## Configuración
+
+Ver `.env.example`. Lo obligatorio es `TELEGRAM_BOT_TOKEN`, `FLARESOLVERR_URL`, `POSTGRES_*` y
+`SEED_CHAT_ID` + `SEED_URLS` (o darse de alta por `/start`).
+
+⚠️ **FlareSolverr usa `PROXY_URL`, nunca `HTTP_PROXY`/`HTTPS_PROXY`.** Chromium lee esas variables
+del entorno, su test de arranque falla con `Error getting browser User-Agent` y el contenedor muere;
+con él se cae todo el camino de fetch. El proxy del bot se llama `ZONAPROP_PROXY` por el mismo
+motivo: Go lee `HTTP_PROXY` del entorno por defecto y enrutaría Telegram y FlareSolverr a través del
+proxy rotativo.
+
+## Despliegue (en la RPi 5)
 
 ```bash
-cp .env.example .env        # completar TELEGRAM_* y SEARCH_URLS
+git clone <repo> && cd property-search
+cp .env.example .env       # completar TELEGRAM_*, POSTGRES_PASSWORD, FLARESOLVERR_PROXY_URL
+docker compose down --remove-orphans   # quita contenedores de nombres viejos
 docker compose up -d --build
-docker compose logs -f      # verificar la primera corrida
+docker compose logs -f zonaprop-bot
 ```
 
-La imagen es multi-stage (`scratch` + CA certs), sin CGO, ~15 MB, `linux/arm64`. Compila nativo
-en el propio Pi5.
+La imagen es multi-stage (`scratch` + CA certs + zoneinfo embebida), `linux/arm64`, y compila nativo
+en el Pi.
 
-### Cómo armar la URL de búsqueda
+### Activar usuarios
 
-En Zonaprop: buscá lo que quieras (p.ej. `Departamentos > Compra > GBA Norte > San Isidro`),
-copiá la URL de la barra del navegador y usala en `SEARCH_URLS`. Se admiten varias URLs
-(una por línea o separadas por coma).
+Nadie recibe el digest hasta que lo habilites:
+
+```sql
+-- quién está esperando
+SELECT chat_id, onboarded_at FROM users
+ WHERE active = false AND state = 'ready' ORDER BY onboarded_at;
+
+-- habilitar
+UPDATE users SET active = true WHERE chat_id = <id>;
+```
+
+El aviso automático al operador cuando alguien completa el onboarding está diferido: con caudal bajo
+la consulta de arriba alcanza.
+
+### Rotar la contraseña de Postgres
+
+`POSTGRES_PASSWORD` solo se usa al inicializar el volumen. Cambiarla en `.env` después no cambia la
+del cluster:
+
+```sql
+ALTER ROLE zonaprop WITH PASSWORD 'nueva';
+```
+
+y actualizá `.env` en el mismo momento.
 
 ## Desarrollo
 
 ```bash
-nix develop            # toolchain Go reproducible (esta máquina no tiene Go global)
-make fmt vet test      # formato, vet y tests
-make run               # dry-run local (sin credenciales)
-make probe             # fetch de la primera URL + parseo + resumen
+nix develop                    # toolchain Go reproducible (esta máquina no tiene Go global)
+make fmt vet test              # formato, vet y tests
+make run                       # dry-run local (sin token imprime por consola)
+make up / make down            # postgres + flaresolverr para desarrollo
+make probe URL='https://...'   # fetch real + parseo + resumen, sin tocar la base
 ```
 
-### Pruebas
+### Tests
 
-`go test ./...` cubre: parseo (contra `fixtures/search_gba_norte.html`, una pagina real de Zonaprop), dedup
-del historial, reintentos con backoff, modos de fetch (FlareSolverr / TLS / proxy), payload y
-rate-limit de Telegram, y el loop de orquestación con fakes.
+`go test ./...` cubre, entre otras cosas:
+
+- **Fetch**: perfiles TLS, proxy, reintentos con backoff, y la **clasificación** (`blocked` vs
+  `transport` vs `http-status`) que decide si una URL se reintenta o se rechaza.
+- **Parser**: contra `fixtures/search_gba_norte.html`, una página real de Zonaprop. Valida los 30
+  ids, los buckets de precio y tamaño, la guarda de outliers de m² y que un valor ausente quede en
+  `NULL` y no en 0.
+- **Postgres**: migraciones idempotentes, seeds, y **aislamiento entre usuarios** (A no ve las
+  búsquedas ni la entrenan los datos de B) contra una base real y descartable por test.
+- **Digest**: que la primera indexación **baselinee** sin mandar, que re-ejecutar no re-mande, que el
+  tope diario **difiera** en vez de descartar, y que un día interrumpido se reanude.
+- **Scoring**: partición por `operation_type:currency`, `unknown` en vez de 0, razones solo con
+  evidencia suficiente, y que un modelo vacío puntúe 0.
+- **Onboarding**: rechazo de dominios que no son Zonaprop, inyección del orden por fecha, cap de
+  búsquedas y colisión de nombres.
+- **End-to-end**: el pipeline completo (config → Postgres → fetch real → parser → baseline) contra el
+  fixture real servido por HTTP local, sin tocar Zonaprop.
+
+## Límites conocidos
+
+- **Cobertura**: solo la primera página de cada búsqueda (~30 publicaciones más nuevas). Zonaprop no
+  expone paginación server-side en esa URL.
+- **Telegram**: no verificado end-to-end en el Pi.
+- **Teléfono**: no se confirmó que el `telephone` del detalle varíe por publicación. Si resultara
+  genérico, el 👍 manda solo el link.
+- **Modelo**: con pocos datos el orden es prior más ruido; la UI lo dice en vez de disimularlo.

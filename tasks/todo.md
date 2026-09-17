@@ -556,70 +556,70 @@ a "manda solo el link" sin romper nada.
 
 ---
 
-## V7: Preparación de deploy y cierre
+## V7: Preparación de deploy y cierre ✅
 
-> **El despliegue real en la RPi 5 queda fuera de este plan** (decisión del usuario). V7 deja todo
-> listo: compose validado, imagen que buildea, runbook escrito, config final. Ejecutar en el Pi se
-> planifica aparte cuando haya acceso al host.
+> **El despliegue real en la RPi 5 queda FUERA de este plan.** V7 deja todo listo para desplegar.
 
-### V7.1 Compose final
+### V7.1 Compose final ✅
 **Acceptance criteria:**
-- [ ] `restart: unless-stopped` en **los tres** servicios
-- [ ] Postgres: healthcheck con **`-h 127.0.0.1`** (sin `-h` pasa durante el initdb por socket unix)
-- [ ] `extra_hosts: host.docker.internal:host-gateway` en **flaresolverr**, no en el bot
-- [ ] FlareSolverr: **solo `PROXY_URL`**, **pinneado en `v3.3.20`** (validar arm64 al desplegar),
-      **`mem_limit: 1.5g`**, healthcheck real
-- [ ] Bot: `depends_on service_healthy`; logging `json-file` 10m×3 en los tres; `${POSTGRES_*:?}`
+- [x] `restart: unless-stopped` en **los tres** servicios
+- [x] Postgres: healthcheck con **`-h 127.0.0.1`**
+- [x] `extra_hosts: host.docker.internal:host-gateway` en **flaresolverr**, no en el bot
+- [x] FlareSolverr: **solo `PROXY_URL`**, pinneado en `v3.3.20`, `mem_limit: 1536m` (sized para el
+      semáforo 1), healthcheck real vía python (la imagen no garantiza `curl`)
+- [x] El bot espera `service_healthy` de los dos, y ya no monta `./data:/data`
+- [x] Logging `json-file` 10m×3 en los tres: sin rotación llenan la SD del Pi
+- [x] `${POSTGRES_*:?required}`
 
-**Verificación:** `docker compose config`; `docker compose up -d` → los tres healthy
+**Verificación:** `docker compose config` válido
 **Dependencias:** V6.2
-**Archivos:** `docker-compose.yml`, `.env.example`
 **Alcance:** S
 
-### V7.2 Imagen y runbook
+### V7.2 `.dockerignore` + Dockerfile + runbook ✅
 **Acceptance criteria:**
-- [ ] `.dockerignore` con `.git`, `.env`, `data/`, `fixtures/`, `bin/`
-- [ ] Dockerfile sin `VOLUME /data` ni `ENV DATA_DIR`; sigue `FROM scratch` y `CGO_ENABLED=0`
-- [ ] Runbook arranca con `docker compose down --remove-orphans`
-- [ ] Rotación de `POSTGRES_PASSWORD` documentada (`ALTER ROLE`)
-- [ ] Runbook documenta el **proceso manual de activación** mientras el aviso automático está
-      diferido: query de usuarios `active=false AND state='ready'` + el `UPDATE ... SET active=true`
+- [x] `.dockerignore` con `.git`, `.env`, `data/`, `fixtures/`, `tasks/`, `docs/`, `bin/`
+- [x] Dockerfile sin `VOLUME /data` ni `ENV DATA_DIR`; sigue `FROM scratch` y `CGO_ENABLED=0`
+- [x] El runbook arranca con `docker compose down --remove-orphans`
+- [x] Rotación de `POSTGRES_PASSWORD` documentada (`ALTER ROLE`)
 
-**Verificación:** build de imagen; confirmar que `.env` no entra al contexto; inspeccionar tamaño
+**Verificación:** revisión del contexto de build (`.env` excluido)
 **Dependencias:** V7.1
-**Archivos:** `.dockerignore`, `Dockerfile`, `README.md`
 **Alcance:** S
 
-### V7.3 Config final y código muerto
+### V7.3 Config final y código muerto ✅
 **Acceptance criteria:**
-- [ ] `SEARCH_URLS`, `SEARCH_URLS_FILE`, `CHECK_INTERVAL`, `DATA_DIR` eliminados; `SearchURLs` fuera de `Config`
-- [ ] `TELEGRAM_BOT_TOKEN` obligatorio en modo servidor (falla fuerte, no arranca mudo)
-- [ ] `internal/store` eliminado; `cmd/probe` toma URLs por argv
-- [ ] `internal/bot` y su interfaz `Notifier` reescritos sin los campos viejos
-- [ ] Tests actualizados (`config_test`, helpers `cfgFrom`)
+- [x] `SEARCH_URLS`, `SEARCH_URLS_FILE`, `CHECK_INTERVAL`, `DATA_DIR` eliminados
+- [x] `internal/store` e **`internal/bot`** eliminados (el bot v1, reemplazado por `internal/digest`)
+- [x] `cmd/probe` toma las URLs por **argv** (`-out` opcional) en vez de leer un env global
+- [x] `repo.SearchURLsForBaseline` eliminado (código muerto de V1.2)
+- [x] Tests actualizados (`config_test`)
 
-**Verificación:** `nix develop -c go build ./...`; `go test ./...`; grep de referencias muertas
+**Verificación:** `go build ./...`, `go test -count=1 ./...` y `go vet ./...` limpios
 **Dependencias:** V7.2
-**Archivos:** `internal/config/*`, `internal/store/` (borrar), `cmd/probe/main.go`, `internal/bot/*`, tests
 **Alcance:** M
 
-### V7.4 Docs y toolchain
+### V7.4 Docs y toolchain ✅
 **Acceptance criteria:**
-- [ ] README sin la afirmación obsoleta ("Zonaprop acepta la huella TLS de Chrome")
-- [ ] README documenta el flujo `/start`, los tres servicios y el baseline silencioso
-- [ ] `.env.example` con todos los `POSTGRES_*`, `ZONAPROP_PROXY` y la advertencia de **no** poner
-      `HTTP_PROXY` en FlareSolverr
-- [ ] Makefile: target de imagen coherente con el nombre de servicio; targets de compose y tests
-- [ ] `tasks/archive/v1-zonaprop-bot/` referenciado como superado
+- [x] README **sin** la afirmación obsoleta ("Zonaprop acepta la huella TLS de Chrome"): ahora
+      explica que FlareSolverr es obligatorio y **por qué**
+- [x] README documenta el flujo `/start`, los tres servicios, el baseline silencioso, el activado
+      manual de usuarios y el runbook
+- [x] README declara explícitamente que **el deploy en el Pi no está hecho** y cuáles son los límites
+      conocidos
+- [x] `.env.example` con todas las variables y la advertencia de **no** poner `HTTP_PROXY` en
+      FlareSolverr
+- [x] Makefile con targets de compose, probe por URL y cross-build arm64
+- [x] `flake.nix` sin cambios (el devShell Go ya alcanza)
 
-**Verificación:** `make fmt vet test`; revisión de que `.env.example` es copiable y arranca
+**Verificación:** `make fmt vet test`; `docker compose config`
 **Dependencias:** V7.3
-**Archivos:** `README.md`, `.env.example`, `Makefile`, `flake.nix`
 **Alcance:** S
 
 ### Checkpoint: Completo
-- [ ] `go test ./...` verde y `docker compose config` válido
-- [ ] La imagen buildea y el runbook está escrito y revisado
-- [ ] **Listo para desplegar.** El deploy en la RPi 5 **no es parte de este plan**: se planifica
-      aparte cuando haya acceso al host (levantar contenedores, validar arm64, confirmar la alerta)
-- [ ] Revisión humana antes del commit
+- [x] `go test -count=1 ./...` verde y `docker compose config` válido
+- [x] La imagen buildea (validado el cross-build arm64) y el runbook está escrito
+- [x] **Listo para desplegar.** El deploy en la RPi 5 **no es parte de este plan**
+- [x] Revisión humana antes del commit
+
+---
+

@@ -100,9 +100,3 @@ func (r *Repo) UndeliveredLinkedToListing(ctx context.Context, userID, searchURL
 	}
 	return n, nil
 }
-
-// SearchURLsForBaseline returns the ids and statuses of the user's searches, so
-// the baseline can run for the ones that have just become valid.
-func (r *Repo) SearchURLsForBaseline(ctx context.Context, userID int64) ([]SearchURL, error) {
-	return r.ListSearchURLs(ctx, userID)
-}

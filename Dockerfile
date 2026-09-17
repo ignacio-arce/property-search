@@ -10,6 +10,4 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bot ./c
 FROM scratch
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/bot /bot
-VOLUME /data
-ENV DATA_DIR=/data
 ENTRYPOINT ["/bot"]

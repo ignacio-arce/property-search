@@ -25,14 +25,6 @@ type Config struct {
 	TelegramBotToken string
 	TelegramChatID   string
 
-	// SearchURLs is deprecated. Search URLs are per-user rows in Postgres now
-	// (seeded via SEED_URLS or added through /start). Kept temporarily so the v1
-	// bot and probe keep working; V7.3 removes the field entirely.
-	SearchURLs []string
-	// CheckInterval is deprecated along with the ticker loop it drove; the daily
-	// scheduler replaces it. Removed in V7.3.
-	CheckInterval time.Duration
-
 	FlareSolverrURL string // optional
 	// ZonapropProxy is the rotating proxy for outgoing Zonaprop requests. It is
 	// deliberately NOT called HTTP_PROXY: Go's net/http reads HTTP_PROXY from the
@@ -47,8 +39,6 @@ type Config struct {
 	// It is the primary defence against Cloudflare degrading the IP, so it is
 	// tunable rather than hardcoded.
 	FetchRateLimit time.Duration
-
-	DataDir string
 
 	// Postgres connection parts. The DSN is assembled in Go by DatabaseURL rather
 	// than interpolated in compose, so a password containing URL metacharacters
@@ -85,14 +75,12 @@ func Load(getenv func(string) string) (*Config, error) {
 	cfg := &Config{
 		TelegramBotToken:  getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramChatID:    getenv("TELEGRAM_CHAT_ID"),
-		CheckInterval:     60 * time.Minute,
 		FlareSolverrURL:   strings.TrimSuffix(getenv("FLARESOLVERR_URL"), "/"),
 		ZonapropProxy:     getenv("ZONAPROP_PROXY"),
 		FetchRetries:      3,
 		FetchTimeout:      30 * time.Second,
 		MaxBrowserTimeout: 60 * time.Second,
 		FetchRateLimit:    60 * time.Second,
-		DataDir:           "data",
 		PostgresHost:      "localhost",
 		PostgresPort:      "5432",
 		PostgresUser:      "zonaprop",
@@ -107,22 +95,6 @@ func Load(getenv func(string) string) (*Config, error) {
 	}
 
 	var err error
-	// Deprecated and optional: an empty result is valid now that search URLs live
-	// in Postgres. V7.3 removes this block.
-	if cfg.SearchURLs, err = searchURLs(getenv("SEARCH_URLS"), getenv("SEARCH_URLS_FILE")); err != nil {
-		return nil, err
-	}
-
-	if v := getenv("CHECK_INTERVAL"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return nil, fmt.Errorf("invalid CHECK_INTERVAL %q: %w", v, err)
-		}
-		if d <= 0 {
-			return nil, fmt.Errorf("CHECK_INTERVAL must be positive, got %q", v)
-		}
-		cfg.CheckInterval = d
-	}
 
 	if v := getenv("FETCH_RETRIES"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -154,10 +126,6 @@ func Load(getenv func(string) string) (*Config, error) {
 			return nil, fmt.Errorf("invalid FETCH_RATE_LIMIT %q: must be a positive duration", v)
 		}
 		cfg.FetchRateLimit = d
-	}
-
-	if v := getenv("DATA_DIR"); v != "" {
-		cfg.DataDir = v
 	}
 
 	if v := getenv("POSTGRES_HOST"); v != "" {
@@ -286,37 +254,6 @@ func seedURLs(raw string) ([]SeedURL, error) {
 		out = append(out, SeedURL{Label: label, URL: u})
 	}
 	return out, nil
-}
-
-func searchURLs(env, file string) ([]string, error) {
-	var raw []string
-	if env != "" {
-		raw = append(raw, env)
-	}
-	if file != "" {
-		b, err := os.ReadFile(file)
-		if err != nil {
-			return nil, fmt.Errorf("reading SEARCH_URLS_FILE %q: %w", file, err)
-		}
-		raw = append(raw, string(b))
-	}
-
-	var urls []string
-	seen := make(map[string]bool)
-	for _, chunk := range raw {
-		for _, u := range strings.FieldsFunc(chunk, func(r rune) bool { return r == '\n' || r == ',' }) {
-			u = strings.TrimSpace(u)
-			if u == "" {
-				continue
-			}
-			if !seen[u] {
-				seen[u] = true
-				urls = append(urls, u)
-			}
-		}
-	}
-	// An empty result is intentionally not an error: URLs come from Postgres now.
-	return urls, nil
 }
 
 func validHTTPURL(raw string) bool {
