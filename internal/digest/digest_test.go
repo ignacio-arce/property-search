@@ -44,11 +44,11 @@ type recordingNotifier struct {
 	fail map[string]bool
 }
 
-func (n *recordingNotifier) Notify(_ context.Context, _ string, _ int64, l model.Listing) error {
-	if n.fail[l.ZonapropID] {
-		return fmt.Errorf("notify %s failed", l.ZonapropID)
+func (n *recordingNotifier) Notify(_ context.Context, _ string, d model.Delivery) error {
+	if n.fail[d.Listing.ZonapropID] {
+		return fmt.Errorf("notify %s failed", d.Listing.ZonapropID)
 	}
-	n.sent = append(n.sent, l)
+	n.sent = append(n.sent, d.Listing)
 	return nil
 }
 

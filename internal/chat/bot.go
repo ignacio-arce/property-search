@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"zonapropbot/internal/repo"
+	"zonapropbot/internal/score"
 	"zonapropbot/internal/telegram"
 )
 
@@ -248,32 +249,34 @@ func (p *Poller) handleMessage(ctx context.Context, msg *telegram.Message) error
 }
 
 func (p *Poller) handleModel(ctx context.Context, userID int64, chatID string) error {
+	version, err := p.Repo.ModelVersion(ctx, userID)
+	if err != nil {
+		return err
+	}
 	likes, dislikes, err := p.Repo.RatingCounts(ctx, userID)
 	if err != nil {
 		return err
 	}
-	return p.API.SendText(ctx, chatID, modelText(likes, dislikes))
-}
-
-// minRatingsForRanking is when the ranking with reasons becomes meaningful. Below
-// it the UI must not pretend to have learned anything.
-const minRatingsForRanking = 30
-
-// modelText reports only what can honestly be said. Bucket weights arrive in V3;
-// until then the counts are the whole truth, and the message says so.
-func modelText(likes, dislikes int) string {
-	total := likes + dislikes
-	var b strings.Builder
-	b.WriteString("🤖 Modelo\n")
-	fmt.Fprintf(&b, "Calificaciones: %d 👍 · %d 👎\n", likes, dislikes)
-	if total < minRatingsForRanking {
-		fmt.Fprintf(&b, "\nTodavía aprendiendo: %d de %d calificaciones.\n", total, minRatingsForRanking)
-		b.WriteString("Hasta llegar a esa marca ordeno por más recientes y no muestro razones, para no inventar señales que no tengo.")
-	} else {
-		b.WriteString("\nYa hay suficientes calificaciones para ordenar por tus gustos.")
+	agreement, samples, hasAgreement, err := score.Agreement(ctx, p.Repo, userID, p.now())
+	if err != nil {
+		return err
 	}
-	return b.String()
+
+	text := score.SummaryText(version, likes, dislikes, agreement, samples, hasAgreement)
+	if version > 0 {
+		weights, err := score.Load(ctx, p.Repo, userID)
+		if err != nil {
+			return err
+		}
+		if buckets := score.BucketSummary(weights, maxBucketsShown); buckets != "" {
+			text += "\n\nLo que más aprendió:\n" + buckets
+		}
+	}
+	return p.API.SendText(ctx, chatID, text)
 }
+
+// maxBucketsShown keeps /model readable; the full list lives in the database.
+const maxBucketsShown = 8
 
 func helpText() string {
 	return strings.Join([]string{

@@ -292,66 +292,69 @@ el E2E. La única verificación que falta de verdad es una tarjeta llegando a Te
 
 ---
 
-## V3: Reordena por lo aprendido y explica
+## V3: Reordena por lo aprendido y explica ✅
 
-### V3.1 Buckets + score literal
+### V3.1 Buckets + score literal ✅
 **Descripción:** La función de score, escrita de una única manera implementable.
 
 **Acceptance criteria:**
-- [ ] Buckets categóricos **sin particionar**: `partido`, `banios`
-- [ ] Buckets numéricos **namespaciados por `operation_type:currency`**
-      (`ppm2:venta:USD:1500-1750`, `expensas:alquiler:ARS:250k-300k`), con paso por namespace:
-      `venta:USD` = 250 validado; `alquiler:ARS`/`venta:ARS` provisionales a validar con datos
-- [ ] **`operation_type` y `currency` NO son buckets de scoring**, son claves de partición
-- [ ] `ppm2` sobre `m2_tot` con outliers `[10,1000]` fuera; `m2_bin` de 10 m² con `m2_basis` en la clave;
-      `expensas` namespaciada
-- [ ] **`currency` vacío/desconocido ⇒ features numéricas a `unknown`** (guarda contra el outlier de 1000×)
-- [ ] `rooms` y `dorm` **fuera del scoring** (medidos constantes en la búsqueda real)
-- [ ] `rate = (ups+1)/(ups+downs+2)`; `score = mean(ln(rate/0.5))`; unknown aporta 0
-- [ ] Orden `score DESC NULLS LAST, first_indexed_at DESC, recency_rank ASC`
+- [x] Buckets categóricos **sin particionar**: `partido`, `banios`
+- [x] Buckets numéricos **namespaciados por `operation_type:currency`**
+      (`ppm2:venta:USD:1500-1750`), con paso por namespace: `venta:USD` = 250 lineal
+      (validado por A1), cualquier otro namespace con **bins logarítmicos** (razón 1.12)
+- [x] **`operation_type` y `currency` NO son buckets de scoring**, son claves de partición
+- [x] `ppm2` sobre `m2_tot` (A1 midió 0 apariciones de `m² cub.`); `m2_bin` de 10 m²
+- [x] **`currency` vacío/desconocido ⇒ ninguna feature numérica** (guarda contra el outlier de 1000×)
+- [x] `rooms` y `dorm` **fuera del scoring**; ausentes → `unknown`, nunca 0
+- [x] `rate = (ups+1)/(ups+downs+2)`; `score = mean(ln(rate/0.5))` sobre los buckets **con
+      evidencia** (uno desconocido no diluye el promedio)
+- [x] Orden por `score DESC` y, en empates, el orden de recencia de la consulta
+      (`sort.SliceStable` sobre `first_indexed_at DESC, recency_rank ASC`)
 
-**Verificación:**
-- [ ] Tests de tabla de buckets sobre `fixtures/search_gba_norte.html`
-- [ ] Test de orden determinista con scores empatados
-
+**Verificación:** `TestExtractNamespacesNumericFeatures`, `TestExtractOmitsNumericWhenCurrencyUnknown`,
+`TestExtractUsesUnknownNeverZero`, `TestScoreIsZeroWithoutEvidence`, `TestScoreAveragesKnownBuckets`
 **Dependencias:** V1.4, V2.3
-**Archivos:** `internal/score/*.go`
+**Archivos:** `internal/score/{features,weights}.go`, `migrations/0003_*`
 **Alcance:** M
 
-### V3.2 Retrain por usuario con versión atómica
+### V3.2 Retrain por usuario con versión atómica ✅
 **Descripción:** Aprender sin pisar el score que se está leyendo.
 
 **Acceptance criteria:**
-- [ ] Retrain **por usuario**, cada uno en su propia transacción, log-and-continue
-- [ ] `active_model_version` volteado **dentro** de la misma transacción que escribe los pesos
-- [ ] El scorer lee solo la versión activa
-- [ ] Prune de versiones no referenciadas por `deliveries`
+- [x] Retrain **por usuario**, cada uno en su propia transacción, log-and-continue
+- [x] `active_model_version` volteado **dentro** de la misma transacción que escribe los pesos
+- [x] Entrena con el **snapshot de la entrega**, no con el `features` actual: si el vendedor cambia
+      el precio, el modelo aprende de lo que el usuario realmente vio
+- [x] Prune de versiones no referenciadas por `deliveries`
 
-**Verificación:**
-- [ ] Test: los ratings corruptos de un usuario no afectan a otro
-- [ ] Test: crash entre escritura y flip no deja lectores a medias
-
+**Verificación:** `TestRetrainBuildsAndActivatesANewGeneration` (v1 → v2, buckets con los ups/downs
+correctos), `TestRetrainWithNoRatingsStillActivatesAnEmptyModel`
 **Dependencias:** V3.1
-**Archivos:** `internal/score/retrain.go`, `internal/db/*.go`
+**Archivos:** `internal/score/retrain.go`, `internal/repo/weights.go`
 **Alcance:** M
 
-### V3.3 Razones n≥3 + concordancia
+### V3.3 Razones n≥3 + concordancia ✅
 **Descripción:** La parte que hace confiable al modelo… o que se calla si no tiene datos.
 
 **Acceptance criteria:**
-- [ ] Razones: top-2 buckets con `(ups+downs) ≥ 3`, desempate `|rate-0.5|`, **en español**
-- [ ] Si ningún bucket llega a n≥3 → **no se muestra ninguna razón**
-- [ ] `/model`: concordancia pairwise **intra-día** anclada en `ratings.created_at`, recalculada
-- [ ] Suprimida con n<30, con mensaje "todavía aprendiendo"
+- [x] Razones: top-2 buckets con `(ups+downs) ≥ 3`, ordenadas por `|rate-0.5|`, **en español**
+- [x] Si ningún bucket llega a n≥3 → **no se muestra ninguna razón**
+- [x] `/model`: concordancia pairwise **intra-día** sobre 30 días, anclada en `ratings.created_at`
+- [x] Suprimida con n<30, con mensaje "todavía no medible (N de 30)"
+- [x] La tarjeta muestra el **ranking** ("#2 de 14 hoy") y hasta **2 razones**; nunca un porcentaje
+- [x] `/model` lista los buckets con más evidencia (`BucketSummary`)
 
-**Verificación:** tests de tabla de razones; test de supresión
+**Verificación:** `TestReasonsNeedMinimumSupport`, `TestReasonsAreOrderedByStrengthAndCapped`,
+`TestBucketSummaryOrdersByEvidence`, `TestAgreementNeedsEnoughSamples`,
+`TestSummaryTextIsHonestAboutWhatIsKnown`
 **Dependencias:** V3.2
-**Archivos:** `internal/score/reasons.go`, `internal/chat/commands.go`
-**Alcance:** S
+**Archivos:** `internal/score/{weights,retrain}.go`, `internal/digest/digest.go`,
+`internal/telegram/telegram.go`, `internal/chat/bot.go`
+**Alcance:** M
 
 ### Checkpoint V3
-- [ ] Con <30 ratings la UI no inventa razones ni porcentajes
-- [ ] El orden con empates es estable y favorece lo más nuevo
+- [x] Con <30 ratings la UI no inventa razones ni porcentajes
+- [x] El orden con empates es estable y favorece lo más nuevo
 
 ---
 

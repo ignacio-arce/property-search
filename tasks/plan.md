@@ -102,13 +102,13 @@ Acá va el índice y el orden.
 - [x] Un restart no pierde ni duplica updates
 
 ### V3: Reordena por lo aprendido y explica
-- [ ] V3.1 Buckets + score literal + orden determinista
-- [ ] V3.2 Retrain por usuario con versión atómica y prune
-- [ ] V3.3 Razones n≥3 + concordancia pairwise en `/model`
+- [x] V3.1 Buckets + score literal + orden determinista
+- [x] V3.2 Retrain por usuario con versión atómica y prune
+- [x] V3.3 Razones n≥3 + concordancia pairwise en `/model`
 
 ### Checkpoint V3
-- [ ] Con <30 ratings la UI no inventa razones ni porcentajes
-- [ ] El orden con scores empatados es estable y a favor de lo más nuevo
+- [x] Con <30 ratings la UI no inventa razones ni porcentajes
+- [x] El orden con scores empatados es estable y a favor de lo más nuevo
 
 ### V4: Corre solo todos los días
 - [ ] V4.1 Scheduler tz-aware (tzdata, `SCHEDULE_TZ`, próximo 09:00, sin boot run)

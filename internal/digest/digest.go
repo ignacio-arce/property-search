@@ -12,11 +12,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 
 	"zonapropbot/internal/fetch"
 	"zonapropbot/internal/model"
 	"zonapropbot/internal/parser"
 	"zonapropbot/internal/repo"
+	"zonapropbot/internal/score"
 )
 
 // Fetcher retrieves a search page. fetch.Client satisfies it.
@@ -26,7 +28,7 @@ type Fetcher interface {
 
 // Notifier delivers one listing to one chat. telegram.Notifier satisfies it.
 type Notifier interface {
-	Notify(ctx context.Context, chatID string, listingID int64, l model.Listing) error
+	Notify(ctx context.Context, chatID string, d model.Delivery) error
 }
 
 // Runner owns one delivery cycle.
@@ -160,28 +162,71 @@ func (r *Runner) sendUndelivered(ctx context.Context, userID, chatID int64) (int
 		return 0, err
 	}
 
+	weights, err := score.Load(ctx, r.Repo, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Rank, then sort. The sort is stable on top of the query recency order, so
+	// ties fall back to "newest first" instead of an arbitrary order.
+	type rankedListing struct {
+		candidate repo.Candidate
+		score     float64
+		reasons   []string
+	}
+	ranked := make([]rankedListing, 0, len(candidates))
+	for _, c := range candidates {
+		features := score.Extract(c.Listing)
+		value, _ := weights.Score(features)
+		var reasons []string
+		for _, reason := range weights.Reasons(features, maxReasonsOnCard) {
+			reasons = append(reasons, reason.Text)
+		}
+		ranked = append(ranked, rankedListing{candidate: c, score: value, reasons: reasons})
+	}
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score > ranked[j].score })
+
 	sent := 0
-	for i, c := range candidates {
+	for i, rk := range ranked {
 		if err := ctx.Err(); err != nil {
 			return sent, err
 		}
 
-		err := r.Notifier.Notify(ctx, formatChatID(chatID), c.ListingID, c.Listing)
-		if err != nil {
-			r.logf("digest: notify listing %d failed: %v", c.ListingID, err)
+		delivery := model.Delivery{
+			ListingID: rk.candidate.ListingID,
+			Listing:   rk.candidate.Listing,
+			Header:    rankHeader(i+1, len(ranked)),
+			Reasons:   rk.reasons,
+		}
+		if err := r.Notifier.Notify(ctx, formatChatID(chatID), delivery); err != nil {
+			r.logf("digest: notify listing %d failed: %v", rk.candidate.ListingID, err)
 			continue
 		}
 
 		// Recorded after a successful send. A crash in between re-sends the listing
 		// tomorrow rather than losing it: a rare duplicate beats a silent loss.
 		// message_id is not threaded yet; V2.2 needs it to revoke the keyboard.
-		if err := r.Repo.MarkDelivered(ctx, userID, c.ListingID, 0, i+1, nil,
-			repo.DeliverySent, c.Listing.Snapshot()); err != nil {
-			return sent, fmt.Errorf("record delivery of listing %d: %w", c.ListingID, err)
+		recorded := rk.score
+		if err := r.Repo.MarkDelivered(ctx, userID, rk.candidate.ListingID, 0, i+1, &recorded,
+			repo.DeliverySent, rk.candidate.Listing.Snapshot()); err != nil {
+			return sent, fmt.Errorf("record delivery of listing %d: %w", rk.candidate.ListingID, err)
 		}
 		sent++
 	}
 	return sent, nil
+}
+
+// maxReasonsOnCard is how many plain-language reasons a card shows. Two is enough
+// to be useful without turning the caption into a report.
+const maxReasonsOnCard = 2
+
+// rankHeader states the position honestly. A percentage would be false precision
+// with this little data.
+func rankHeader(position, total int) string {
+	if total <= 1 {
+		return "Hoy"
+	}
+	return fmt.Sprintf("#%d de %d hoy", position, total)
 }
 
 func (r *Runner) logf(format string, args ...any) {

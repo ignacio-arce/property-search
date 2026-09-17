@@ -221,21 +221,6 @@ func TestGroupChatIsRefused(t *testing.T) {
 	}
 }
 
-func TestModelTextDoesNotPretendBelowThreshold(t *testing.T) {
-	low := modelText(3, 1)
-	if strings.Contains(low, "suficientes") {
-		t.Errorf("below the threshold it must not claim to have learned: %s", low)
-	}
-	if !strings.Contains(low, "Todavía aprendiendo") {
-		t.Errorf("below the threshold it must say so: %s", low)
-	}
-
-	high := modelText(40, 10)
-	if !strings.Contains(high, "suficientes") {
-		t.Errorf("at the threshold it should say the ranking is available: %s", high)
-	}
-}
-
 func TestModelCommandRepliesWithCounts(t *testing.T) {
 	p, api, _, pool := newTestPoller(t)
 	listingID := delivered(t, pool, 7, 7, "aaa", time.Now())
@@ -254,5 +239,8 @@ func TestModelCommandRepliesWithCounts(t *testing.T) {
 	}
 	if len(api.texts) != 1 || !strings.Contains(api.texts[0], "1 👍") {
 		t.Errorf("texts = %v", api.texts)
+	}
+	if !strings.Contains(api.texts[0], "Modelo") {
+		t.Errorf("expected the model report, got %v", api.texts)
 	}
 }

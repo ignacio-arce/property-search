@@ -16,6 +16,7 @@ import (
 	"zonapropbot/internal/digest"
 	"zonapropbot/internal/fetch"
 	"zonapropbot/internal/repo"
+	"zonapropbot/internal/score"
 	"zonapropbot/internal/telegram"
 )
 
@@ -82,6 +83,22 @@ func main() {
 
 	logger.Printf("bot: flaresolverr=%s proxy=%s rate=%s (dry-run=%v)",
 		onOff(cfg.FlareSolverrURL), onOff(cfg.ZonapropProxy), cfg.FetchRateLimit, cfg.TelegramBotToken == "")
+
+	// Retrain each active user's model from their ratings. V4.2 turns this into a
+	// nightly job; doing it at startup keeps the model fresh until then.
+	rp := repo.New(pool)
+	activeUsers, err := rp.ListActiveUsers(ctx)
+	if err != nil {
+		log.Fatalf("list active users: %v", err)
+	}
+	for _, u := range activeUsers {
+		version, err := score.Retrain(ctx, rp, u.UserID)
+		if err != nil {
+			logger.Printf("retrain user %d: %v", u.UserID, err)
+			continue
+		}
+		logger.Printf("retrain user %d: model v%d", u.UserID, version)
+	}
 
 	run := func() {
 		start := time.Now()

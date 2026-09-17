@@ -89,19 +89,20 @@ func (n *Notifier) dryRun() bool { return n.token == "" }
 // Notify delivers one listing to chatID (empty falls back to the configured
 // default). listingID is the database row id used to build the rating keyboard;
 // pass 0 to send without one.
-func (n *Notifier) Notify(ctx context.Context, chatID string, listingID int64, l model.Listing) error {
+func (n *Notifier) Notify(ctx context.Context, chatID string, d model.Delivery) error {
 	target := chatID
 	if target == "" {
 		target = n.chatID
 	}
+	l := d.Listing
 
-	text := caption(l)
-	markup := ratingKeyboard(listingID)
+	text := caption(d)
+	markup := ratingKeyboard(d.ListingID)
 
 	if n.dryRun() {
 		fmt.Fprintf(n.out, "DRY-RUN alert: %s\n", text)
 		if markup != "" {
-			fmt.Fprintf(n.out, "  keyboard: u:%d d:%d\n", listingID, listingID)
+			fmt.Fprintf(n.out, "  keyboard: u:%d d:%d\n", d.ListingID, d.ListingID)
 		}
 		if l.PhotoURL != "" {
 			fmt.Fprintf(n.out, "  photo: %s\n", l.PhotoURL)
@@ -140,8 +141,14 @@ func (n *Notifier) Notify(ctx context.Context, chatID string, listingID int64, l
 // caption renders the card within Telegram's limit. The URL is reserved first:
 // it is the one field the user always needs, and appending it last means naive
 // truncation deletes the link before anything else.
-func caption(l model.Listing) string {
+func caption(d model.Delivery) string {
+	l := d.Listing
 	var head []string
+	// The rank is the honest replacement for a probability: with few ratings a
+	// percentage would be false precision.
+	if d.Header != "" {
+		head = append(head, d.Header)
+	}
 	if l.Title != "" {
 		head = append(head, l.Title)
 	}
@@ -156,6 +163,11 @@ func caption(l model.Listing) string {
 	}
 	if l.Location != "" {
 		head = append(head, l.Location)
+	}
+	// Only buckets with enough support produce a reason; when there are none the
+	// card shows none, rather than a guess dressed as an explanation.
+	for _, reason := range d.Reasons {
+		head = append(head, "· "+reason)
 	}
 
 	url := l.CanonicalURL

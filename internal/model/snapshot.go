@@ -64,3 +64,14 @@ func (s Snapshot) Listing() Listing {
 		Operation:    s.Operation,
 	}
 }
+
+// Delivery is one listing ready to be sent, together with the presentation the
+// digest decided: a rank header ("#2 de 14 hoy") and at most two plain-language
+// reasons. Keeping it in model lets the digest and the notifier agree without
+// either importing the other.
+type Delivery struct {
+	ListingID int64
+	Listing   Listing
+	Header    string
+	Reasons   []string
+}

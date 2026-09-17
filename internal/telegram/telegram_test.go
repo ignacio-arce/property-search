@@ -64,7 +64,7 @@ func TestDryRunPrintsWithoutNetwork(t *testing.T) {
 
 	n, out := notifierFor(t, map[string]string{"SEARCH_URLS": "u"}, nil)
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), "", 42, listing()); err != nil {
+	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 42, Listing: listing()}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if hit.Load() {
@@ -113,7 +113,7 @@ func TestNotifySendsMultipartPhoto(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: photoBytes})
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), "", 42, listing()); err != nil {
+	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 42, Listing: listing()}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 }
@@ -135,7 +135,7 @@ func TestNotifyFallsBackToTextWhenNoPhoto(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, nil)
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), "", 42, l); err != nil {
+	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 42, Listing: l}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 }
@@ -155,7 +155,7 @@ func TestNotifyFallsBackToTextWhenImageFetchFails(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{err: io.ErrUnexpectedEOF})
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), "", 42, listing()); err != nil {
+	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 42, Listing: listing()}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 }
@@ -184,7 +184,7 @@ func TestNotifyHonorsRetryAfter(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: []byte("img")})
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), "", 42, listing()); err != nil {
+	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 42, Listing: listing()}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if calls.Load() != 2 {
@@ -193,7 +193,7 @@ func TestNotifyHonorsRetryAfter(t *testing.T) {
 }
 
 func TestNotifyBuildsCaption(t *testing.T) {
-	caption := caption(listing())
+	caption := caption(model.Delivery{Listing: listing()})
 	for _, want := range []string{"Casa en San Isidro", "USD 120.000", "180 m² tot.", "3 amb.", "San Isidro, GBA Norte", "https://www.zonaprop.com.ar/p/casa.html"} {
 		if !strings.Contains(caption, want) {
 			t.Errorf("caption missing %q:\n%s", want, caption)
@@ -228,7 +228,7 @@ func TestNotifySendsRatingKeyboard(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: []byte("img")})
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), "", 4242, listing()); err != nil {
+	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 4242, Listing: listing()}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	for _, want := range []string{`"callback_data":"u:4242"`, `"callback_data":"d:4242"`} {
@@ -243,7 +243,7 @@ func TestCaptionKeepsURLWhenTruncated(t *testing.T) {
 	l := listing()
 	l.Title = strings.Repeat("Departamento amplio luminoso ", 200)
 
-	got := caption(l)
+	got := caption(model.Delivery{Listing: l})
 	if n := utf16Len(got); n > captionLimit {
 		t.Errorf("caption is %d UTF-16 units, limit is %d", n, captionLimit)
 	}
@@ -258,7 +258,7 @@ func TestCaptionCountsUTF16Units(t *testing.T) {
 	l := listing()
 	l.Title = strings.Repeat("🏠", 600) // 1200 UTF-16 units on its own
 
-	got := caption(l)
+	got := caption(model.Delivery{Listing: l})
 	if n := utf16Len(got); n > captionLimit {
 		t.Errorf("caption is %d UTF-16 units, limit is %d", n, captionLimit)
 	}
@@ -288,7 +288,7 @@ func TestPhotoBadRequestFallsBackToText(t *testing.T) {
 		"TELEGRAM_CHAT_ID":   "-100123",
 	}, stubImageFetcher{body: []byte("img")})
 	n.apiBase = server.URL
-	if err := n.Notify(context.Background(), "", 1, listing()); err != nil {
+	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 1, Listing: listing()}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if len(paths) != 2 || !strings.HasSuffix(paths[1], "/sendMessage") {
