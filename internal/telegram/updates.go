@@ -135,8 +135,9 @@ func (n *Notifier) postForm(ctx context.Context, method string, form url.Values)
 		fmt.Fprintf(n.out, "DRY-RUN %s: %s\n", method, form.Encode())
 		return nil
 	}
-	// Parameters go in the body, not the query string, so every POST in this
-	// package has the same shape (sendMessage already did).
+	// The urlencoded endpoints take their parameters in the body. This is not the
+	// shape of every POST here: sendPhoto needs multipart and GetUpdates uses the
+	// query string.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		fmt.Sprintf("%s/bot%s/%s", n.apiBase, n.token, method), strings.NewReader(form.Encode()))
 	if err != nil {

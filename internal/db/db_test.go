@@ -233,7 +233,9 @@ func TestOpenSucceedsAgainstAReachableDatabase(t *testing.T) {
 	ctx := context.Background()
 
 	// dbtest already connected, so this exercises the success path through Open.
-	got, err := Open(ctx, "postgres://"+userInfo(pool)+"", Options{ConnectTimeout: 5 * time.Second})
+	// The pool's own connection string is reused verbatim: rebuilding it from parts
+	// assumed a "postgres://" prefix, which a TEST_POSTGRES_DSN override need not have.
+	got, err := Open(ctx, pool.Config().ConnString(), Options{ConnectTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -274,8 +276,4 @@ func TestOpenStopsOnContextCancellation(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("waited %v with a cancelled context, want a prompt return", elapsed)
 	}
-}
-
-func userInfo(pool *pgxpool.Pool) string {
-	return pool.Config().ConnString()[len("postgres://"):]
 }
