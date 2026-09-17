@@ -61,8 +61,19 @@ funcionaba dejó de resolver. Por eso:
 
 ## Configuración
 
-Ver `.env.example`. Lo obligatorio es `TELEGRAM_BOT_TOKEN`, `FLARESOLVERR_URL`, `POSTGRES_*` y
-`SEED_CHAT_ID` + `SEED_URLS` (o darse de alta por `/start`).
+Ver `.env.example`. Lo obligatorio es `TELEGRAM_BOT_TOKEN`, `FLARESOLVERR_URL` y `POSTGRES_*`.
+
+`SEED_CHAT_ID` + `SEED_URLS` son un **bootstrap opcional de una sola vez**: siembran tu usuario y
+tus búsquedas en el primer arranque, para no tener que darte de alta a mano. Después de esa corrida
+queda marcado en la base y no se vuelve a aplicar — **a partir de ahí la fuente de verdad es
+Postgres**, y tus búsquedas se manejan con `/addurl` y `/rmurl`. Sin esa marca, un reinicio
+resucitaría lo que borraste desde el chat.
+
+### Tus búsquedas viven en Postgres
+
+Una vez que el bot arrancó una vez, las búsquedas son filas de la base y se manejan desde el chat
+(`/addurl`, `/rmurl`, `/list`). El `.env` ya no participa: editar `SEED_URLS` después no cambia
+nada, porque el bootstrap ya se aplicó.
 
 ⚠️ **FlareSolverr usa `PROXY_URL`, nunca `HTTP_PROXY`/`HTTPS_PROXY`.** Chromium lee esas variables
 del entorno, su test de arranque falla con `Error getting browser User-Agent` y el contenedor muere;

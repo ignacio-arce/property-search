@@ -35,8 +35,11 @@ La dev machine no tenía Docker; ahora sí (29.7.2, x86_64). El deploy es arm64.
 - AC: migrador versionado propio: `.sql` embebidos con `go:embed`, tabla `schema_migrations`,
       aplicación en orden, idempotente. Se evita `golang-migrate` como dependencia.
 - AC: seeds idempotentes: fila de settings globales con defaults; datos del operador si
-      `SEED_CHAT_ID` y `SEED_URLS` están presentes. **Los seeds pasan por el mismo validador de
-      URLs que el onboarding** — un typo del operador no puede convertirse en un zombie inmortal.
+      `SEED_CHAT_ID` y `SEED_URLS` están presentes. **El alta del usuario es un bootstrap de UNA SOLA
+      VEZ**, marcado en `settings.bootstrap_seeded_at`: Postgres es la fuente de verdad de usuarios y
+      búsquedas, y sin esa marca un reinicio resucitaría lo que el usuario borró con `/rmurl` o
+      `/borrardatos`. Los seeds pasan por el mismo validador de URLs que el onboarding — un typo del
+      operador no puede convertirse en un zombie inmortal.
 - AC: **`SEED_URLS` = entradas separadas por coma, cada una `label|url`, en una sola línea.** En
       `env_file` los multi-línea sin comillas se parsean como entradas inválidas separadas.
 - AC: tests de integración contra un **Postgres real**, con **`t.Skip` cuando la base no es

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -30,8 +31,16 @@ var globalSettings = map[string]string{
 	"max_daily":  "15",
 }
 
-// Seed inserts the global settings defaults and, when configured, the operator's
-// user together with its search URLs. It is idempotent.
+// bootstrapKey marks that the environment bootstrap already ran.
+const bootstrapKey = "bootstrap_seeded_at"
+
+// Seed inserts the global settings defaults and, on the very first run, the
+// operator's user with its search URLs.
+//
+// The user part is a ONE-TIME bootstrap, recorded in the database. Postgres is the
+// source of truth for users and searches: without this marker a restart would
+// re-insert whatever the user deleted from the chat, so /rmurl and /borrardatos
+// would silently undo themselves on every deploy.
 func Seed(ctx context.Context, pool *pgxpool.Pool, in SeedInput) error {
 	if err := seedSettings(ctx, pool); err != nil {
 		return err
@@ -39,7 +48,38 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, in SeedInput) error {
 	if in.ChatID == "" || len(in.URLs) == 0 {
 		return nil
 	}
-	return seedUser(ctx, pool, in)
+
+	applied, err := bootstrapApplied(ctx, pool)
+	if err != nil {
+		return err
+	}
+	if applied {
+		return nil
+	}
+	if err := seedUser(ctx, pool, in); err != nil {
+		return err
+	}
+	return markBootstrapApplied(ctx, pool)
+}
+
+func bootstrapApplied(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
+	var applied bool
+	err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM settings WHERE key = $1)`, bootstrapKey).Scan(&applied)
+	if err != nil {
+		return false, fmt.Errorf("seed: read bootstrap marker: %w", err)
+	}
+	return applied, nil
+}
+
+func markBootstrapApplied(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx,
+		`INSERT INTO settings (key, value) VALUES ($1, $2)
+		 ON CONFLICT (key) DO NOTHING`, bootstrapKey, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("seed: record bootstrap marker: %w", err)
+	}
+	return nil
 }
 
 func seedSettings(ctx context.Context, pool *pgxpool.Pool) error {

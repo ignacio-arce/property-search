@@ -80,7 +80,8 @@ func TestSeedIsIdempotent(t *testing.T) {
 
 	assertCount(t, pool, "users", 1)
 	assertCount(t, pool, "search_urls", 2)
-	assertCount(t, pool, "settings", len(globalSettings))
+	// The global defaults plus the one-time bootstrap marker.
+	assertCount(t, pool, "settings", len(globalSettings)+1)
 
 	// The stored canonical form must have dropped the tracking parameters.
 	var norm string
@@ -166,4 +167,59 @@ func assertCount(t *testing.T, pool *pgxpool.Pool, table string, want int) {
 	if got != want {
 		t.Errorf("%s has %d rows, want %d", table, got, want)
 	}
+}
+
+// The seed is a bootstrap, not a source of truth: once a user manages their
+// searches from the chat, a restart must not resurrect what they deleted.
+func TestSeedDoesNotResurrectDeletedSearches(t *testing.T) {
+	pool := dbtest.NewPool(t)
+	ctx := context.Background()
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+
+	in := SeedInput{
+		ChatID: "42",
+		URLs:   []SeedURL{{Label: "Casa", URL: "https://www.zonaprop.com.ar/casa.html"}},
+	}
+	if err := Seed(ctx, pool, in); err != nil {
+		t.Fatal(err)
+	}
+	// The user deletes the search from the chat.
+	if _, err := pool.Exec(ctx, `DELETE FROM search_urls WHERE user_id = 42`); err != nil {
+		t.Fatal(err)
+	}
+
+	// A restart re-runs the seeds.
+	if err := Seed(ctx, pool, in); err != nil {
+		t.Fatal(err)
+	}
+
+	assertCount(t, pool, "search_urls", 0)
+}
+
+// The same for the whole account: if the operator wipes their data, a restart must
+// not bring it back.
+func TestSeedDoesNotResurrectADeletedUser(t *testing.T) {
+	pool := dbtest.NewPool(t)
+	ctx := context.Background()
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+
+	in := SeedInput{
+		ChatID: "42",
+		URLs:   []SeedURL{{Label: "Casa", URL: "https://www.zonaprop.com.ar/casa.html"}},
+	}
+	if err := Seed(ctx, pool, in); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE user_id = 42`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Seed(ctx, pool, in); err != nil {
+		t.Fatal(err)
+	}
+
+	assertCount(t, pool, "users", 0)
 }
