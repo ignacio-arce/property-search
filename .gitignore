@@ -15,3 +15,7 @@
 .DS_Store
 # Config local de opencode (contiene credenciales)
 /opencode.json
+
+# Claves y certificados
+*.pem
+*.key

@@ -289,3 +289,82 @@ func TestPhotoBadRequestFallsBackToText(t *testing.T) {
 		t.Errorf("paths = %v, want sendPhoto then sendMessage", paths)
 	}
 }
+
+type recordingImageFetcher struct{ urls []string }
+
+func (f *recordingImageFetcher) Fetch(_ context.Context, u string) ([]byte, error) {
+	f.urls = append(f.urls, u)
+	return []byte("img"), nil
+}
+
+// The photo URL comes from third-party HTML and the bot runs inside the operator's
+// network, so an arbitrary one is a server-side request forgery: fetching it would
+// make the operator's host request an internal address on the page's behalf. The
+// card must still go out, without the photo.
+func TestOffsitePhotoHostIsNotFetched(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			t.Errorf("expected a text fallback, got %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer server.Close()
+
+	img := &recordingImageFetcher{}
+	n, _ := notifierFor(t, map[string]string{
+		"TELEGRAM_BOT_TOKEN": "123:abc",
+		"TELEGRAM_CHAT_ID":   "-100123",
+	}, img)
+	n.apiBase = server.URL
+
+	l := listing()
+	l.PhotoURL = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+	if err := n.Notify(context.Background(), "", model.Delivery{ListingID: 1, Listing: l}); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if len(img.urls) != 0 {
+		t.Errorf("an off-site photo was fetched: %v", img.urls)
+	}
+}
+
+func TestPhotoHostAllowlist(t *testing.T) {
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"https://imgar.zonapropcdn.com/avisos/1/2/3.jpg", true},
+		{"https://zonapropcdn.com/x.jpg", true},
+		{"https://www.zonaprop.com.ar/x.jpg", true},
+		{"http://imgar.zonapropcdn.com/x.jpg", false},      // http
+		{"https://zonapropcdn.com.evil.test/x.jpg", false}, // suffix trap
+		{"https://169.254.169.254/x.jpg", false},           // cloud metadata
+		{"http://192.168.1.1/admin", false},                // LAN
+		{"not a url", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := photoURLAllowed(tc.url); got != tc.want {
+			t.Errorf("photoURLAllowed(%q) = %v, want %v", tc.url, got, tc.want)
+		}
+	}
+}
+
+// A send failure must never put the bot token in a log line. The token lives in the
+// request URL, and net/http errors include the URL, so an unredacted error leaks it.
+func TestNetworkErrorsDoNotLeakTheToken(t *testing.T) {
+	n, _ := notifierFor(t, map[string]string{
+		"TELEGRAM_BOT_TOKEN": "123456:SECRET-TOKEN-VALUE",
+		"TELEGRAM_CHAT_ID":   "-100123",
+	}, nil)
+	// Nothing is listening here, so the request fails and the error travels up to
+	// the caller's log.
+	n.apiBase = "http://127.0.0.1:1"
+
+	err := n.SendText(context.Background(), "-100123", "hola")
+	if err == nil {
+		t.Fatal("expected a network error")
+	}
+	if strings.Contains(err.Error(), "SECRET-TOKEN-VALUE") {
+		t.Errorf("the bot token leaked into the error: %v", err)
+	}
+}

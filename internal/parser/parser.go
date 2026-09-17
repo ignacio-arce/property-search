@@ -17,9 +17,10 @@ import (
 // dropped: a DOM change must be distinguishable from a genuinely empty search,
 // and those two outcomes have opposite handling in the validation layer.
 type Stats struct {
-	Cards       int // elements carrying data-to-posting
-	SkippedType int // not a PROPERTY card
-	SkippedNoID int // PROPERTY card without data-id
+	Cards          int // elements carrying data-to-posting
+	SkippedType    int // not a PROPERTY card
+	SkippedNoID    int // PROPERTY card without data-id
+	SkippedOffsite int // card linking to a host other than the search page's
 }
 
 // Constraints on the covered/total surface, in square metres. The real page
@@ -85,16 +86,26 @@ func ParseWithStats(html []byte, siteBase string) ([]model.Listing, Stats, error
 			return
 		}
 
-		listings = append(listings, listingFromCard(card, zonapropID, origin, operation))
+		listing, ok := listingFromCard(card, zonapropID, origin, operation)
+		if !ok {
+			stats.SkippedOffsite++
+			return
+		}
+		listings = append(listings, listing)
 	})
 
 	return listings, stats, nil
 }
 
 // listingFromCard reads every field of one card. origin and operation come from the
-// search page, which is authoritative for the whole result set.
-func listingFromCard(card *goquery.Selection, zonapropID, origin, operation string) model.Listing {
+// search page, which is authoritative for the whole result set. It reports ok=false
+// when the card links off-site, which the caller counts.
+func listingFromCard(card *goquery.Selection, zonapropID, origin, operation string) (model.Listing, bool) {
 	href := card.AttrOr("data-to-posting", "")
+	canonicalURL, ok := canonical(origin, href)
+	if !ok {
+		return model.Listing{}, false
+	}
 	features := featureSpans(card)
 	m2Tot, m2Cub := sizes(features)
 	priceAmount, currency := parsePrice(text(card.Find("[data-qa=POSTING_CARD_PRICE]").First()))
@@ -102,7 +113,7 @@ func listingFromCard(card *goquery.Selection, zonapropID, origin, operation stri
 
 	return model.Listing{
 		ZonapropID:   zonapropID,
-		CanonicalURL: canonical(origin, href),
+		CanonicalURL: canonicalURL,
 		Title:        titleOf(card),
 		Location:     text(card.Find("[data-qa=POSTING_CARD_LOCATION]").First()),
 		PhotoURL:     photoURL(card),
@@ -116,7 +127,7 @@ func listingFromCard(card *goquery.Selection, zonapropID, origin, operation stri
 		Dorm:         featureInt(features, "dorm."),
 		Banos:        featureInt(features, "baño"),
 		Operation:    operationFor(operation, href),
-	}
+	}, true
 }
 
 // basisOf records which surface the size bucket came from, so total and covered
@@ -144,19 +155,29 @@ func originOf(raw string) string {
 
 // canonical resolves a card href against the site origin and strips the query,
 // which carries per-position tracking (n_src, n_pg, n_pos, n_search_id).
-func canonical(origin, href string) string {
+//
+// It reports ok=false when the href resolves to a different host. The card href is
+// third-party HTML and the canonical URL is fetched later (the contact extractor
+// loads it through FlareSolverr), so following an absolute link such as
+// http://169.254.169.254/ would make the bot a request forger inside the operator's
+// network. Legitimate hrefs are root-relative, so an off-site one is anomalous and
+// gets counted instead of followed.
+func canonical(origin, href string) (string, bool) {
 	base, err := url.Parse(origin)
 	if err != nil {
-		return href
+		return "", false
 	}
 	ref, err := url.Parse(strings.TrimSpace(href))
 	if err != nil {
-		return href
+		return "", false
 	}
 	u := base.ResolveReference(ref)
+	if !strings.EqualFold(u.Hostname(), base.Hostname()) {
+		return "", false
+	}
 	u.RawQuery = ""
 	u.Fragment = ""
-	return u.String()
+	return u.String(), true
 }
 
 // operationOf reads venta/alquiler from the URL. The search path is authoritative

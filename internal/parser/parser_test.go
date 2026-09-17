@@ -379,3 +379,25 @@ func TestOperationOfUsesTheFirstKeyword(t *testing.T) {
 		}
 	}
 }
+
+// A card href is third-party HTML. Following an absolute one off-site would turn
+// the parser into a request forger: the canonical URL is later fetched by the
+// contact extractor, and the bot runs inside the operator's network.
+func TestOffsiteAbsoluteHrefIsRejected(t *testing.T) {
+	html := `<html><body>
+	  <div data-to-posting="http://169.254.169.254/latest/meta-data/" data-id="1" data-posting-type="PROPERTY"></div>
+	  <div data-to-posting="https://evil.example/propiedades/x-2.html" data-id="2" data-posting-type="PROPERTY"></div>
+	  <div data-to-posting="/propiedades/clasificado/local-3.html" data-id="3" data-posting-type="PROPERTY"></div>
+	</body></html>`
+
+	listings, stats, err := ParseWithStats([]byte(html), realSearchURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listings) != 1 || listings[0].ZonapropID != "3" {
+		t.Fatalf("only the same-origin card should survive, got %+v", listings)
+	}
+	if stats.SkippedOffsite != 2 {
+		t.Errorf("SkippedOffsite = %d, want 2 (off-site links must be counted, not silently kept)", stats.SkippedOffsite)
+	}
+}

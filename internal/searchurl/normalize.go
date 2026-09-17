@@ -24,17 +24,22 @@ var trackingParams = map[string]bool{
 	"n_search_id": true,
 }
 
-// IsZonapropURL reports whether raw is an https URL on Zonaprop itself.
-func IsZonapropURL(raw string) bool {
+// HostAllowed reports whether raw is an https URL whose host is domain itself or a
+// subdomain of it. Matching is on the exact host or a dot-suffixed label, never a
+// substring: a substring check lets "zonaprop.com.ar.attacker.test" through.
+func HostAllowed(raw, domain string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
+	if err != nil || u.Scheme != "https" {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	if u.Scheme != "https" {
-		return false
-	}
-	return host == zonapropHost || strings.HasSuffix(host, "."+zonapropHost)
+	domain = strings.ToLower(domain)
+	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+// IsZonapropURL reports whether raw is an https URL on Zonaprop itself.
+func IsZonapropURL(raw string) bool {
+	return HostAllowed(raw, zonapropHost)
 }
 
 // Normalize returns the canonical form of a search URL: lowercased scheme and

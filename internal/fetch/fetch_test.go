@@ -345,3 +345,26 @@ func TestClassifyFlareSolverrFailure(t *testing.T) {
 		}
 	}
 }
+
+// The proxy URL can carry user:password, and transport errors embed the request
+// URL, so an unredacted error would put the proxy credentials in the log.
+func TestProxyCredentialsDoNotLeakIntoErrors(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<html>ok</html>"))
+	}))
+	defer target.Close()
+
+	const secret = "PROXY-PASSWORD-VALUE"
+	cfg := cfgFrom(t, map[string]string{
+		"ZONAPROP_PROXY": "http://user:" + secret + "@127.0.0.1:1",
+		"FETCH_RETRIES":  "0",
+		"FETCH_TIMEOUT":  "2s",
+	})
+	_, err := New(cfg).Fetch(context.Background(), target.URL)
+	if err == nil {
+		t.Fatal("expected a proxy connection error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("the proxy password leaked into the error: %v", err)
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"zonapropbot/internal/config"
 	"zonapropbot/internal/httpx"
 	"zonapropbot/internal/model"
+	"zonapropbot/internal/searchurl"
 )
 
 // imageFetcher downloads image bytes for a photo. The fetch.Client satisfies it,
@@ -38,6 +39,22 @@ const (
 	// caption would drop the price, the size and the location first.
 	maxTitleOnCard = 100
 )
+
+// photoHosts are the only hosts an image will be downloaded from. The URL comes from
+// third-party HTML, and this process runs inside the operator's network, so fetching
+// an arbitrary one would let a page make the operator's host request an internal
+// address (the cloud metadata endpoint being the classic target). Fail closed: when
+// the host is not allowed the card still goes out, without the photo.
+var photoHosts = []string{"zonapropcdn.com", "zonaprop.com.ar"}
+
+func photoURLAllowed(raw string) bool {
+	for _, domain := range photoHosts {
+		if searchurl.HostAllowed(raw, domain) {
+			return true
+		}
+	}
+	return false
+}
 
 // Notifier sends listing alerts to a Telegram chat. Without a token it runs in
 // dry-run mode, printing alerts to out instead of the network.
@@ -105,7 +122,7 @@ func (n *Notifier) Notify(ctx context.Context, chatID string, d model.Delivery) 
 	}
 
 	var photo []byte
-	if l.PhotoURL != "" && n.img != nil {
+	if l.PhotoURL != "" && n.img != nil && photoURLAllowed(l.PhotoURL) {
 		if b, err := n.img.Fetch(ctx, l.PhotoURL); err == nil {
 			photo = b
 		}
@@ -319,7 +336,8 @@ func (n *Notifier) post(req *http.Request) error {
 func (n *Notifier) do(req *http.Request) (*apiResponse, int, error) {
 	httpResp, err := n.client.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("telegram: %w", err)
+		// The token is in the request path and net/http errors include the URL.
+		return nil, 0, httpx.Redact(fmt.Errorf("telegram: %w", err), n.token)
 	}
 	defer httpResp.Body.Close()
 

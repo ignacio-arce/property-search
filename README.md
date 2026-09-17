@@ -157,6 +157,41 @@ make probe URL='https://...'   # fetch real + parseo + resumen, sin tocar la bas
 - **End-to-end**: el pipeline completo (config → Postgres → fetch real → parser → baseline) contra el
   fixture real servido por HTTP local, sin tocar Zonaprop.
 
+## Seguridad
+
+Qué se hizo y qué queda abierto, sin adornos.
+
+**Fronteras de confianza.** Lo único que escribe un tercero es el **HTML de Zonaprop** y los
+**updates de Telegram** (el acceso es abierto: cualquiera puede `/start`). El `.env` lo escribe el
+operador, así que se trata como confiable: si alguien puede editarlo, ya puede ejecutar como el
+usuario del bot.
+
+**Qué está cubierto:**
+
+| Riesgo | Control |
+|---|---|
+| SSRF por el link de la tarjeta | `canonical()` **rechaza hrefs que resuelven a otro host** y los cuenta (`SkippedOffsite`). La URL canónica se fetchea después por el detalle, así que seguir un link absoluto como `http://169.254.169.254/` convertiría al bot en un request forger dentro de la red del operador |
+| SSRF por la foto | Solo se descargan imágenes de `zonapropcdn.com` / `zonaprop.com.ar` por https. Si el host no está permitido la tarjeta sale igual, **sin foto** (fail closed) |
+| SSRF por la URL de búsqueda | `IsZonapropURL` en el alta: https y host exacto o sufijo con punto. Un `Contains` dejaría pasar `zonaprop.com.ar.attacker.test` |
+| Token del bot en los logs | `httpx.Redact` borra el token de los errores de red: `net/http` incluye la URL, y la URL lleva `/bot<token>/` |
+| Callback forjado o repetido | Se valida contra `deliveries`: una publicación que no se le entregó a ese usuario se rechaza |
+| Un usuario viendo datos de otro | Toda query de `repo` lleva `user_id` y las candidatas se acotan por `listing_sources`. Hay test de aislamiento |
+| Secretos en el repo | `.env`, `opencode.json`, `*.pem` y `*.key` en `.gitignore`; nada de eso está trackeado |
+| Fuerza bruta de fetch | El `Gate` pacea **todo** Zonaprop a 1 req/min con cooldown tras un challenge, así que un abuso no puede producir un flood |
+| Vulnerabilidades de dependencias | `govulncheck ./...` sin hallazgos alcanzables |
+
+**Qué queda abierto, y por qué:**
+
+- **Onboarding abierto + presupuesto compartido.** Un desconocido puede dar de alta 5 URLs de
+  Zonaprop y consume turnos de validación. Como el `Gate` es global y secuencial, el daño máximo es
+  **demora** (no flood, no quema de IP), pero puede atrasar el digest del operador. Un tope de
+  usuarios lo cerraría; cambia la política de acceso, así que se decide aparte (ver abajo).
+- **Datos personales sin TTL.** `chat_id` y las calificaciones son datos personales. `/borrardatos`
+  los borra en cascada, pero no hay expiración automática. `deliveries` y `digests` crecen sin
+  límite: hoy es un tema de disco, no de privacidad.
+- **`golang.org/x/crypto/openpgp`** aparece en el audit como "unsafe by design" y **sin fix**. No se
+  usa ni se importa; se deja documentado en vez de silenciado.
+
 ## Límites conocidos
 
 - **Cobertura**: solo la primera página de cada búsqueda (~30 publicaciones más nuevas). Zonaprop no
