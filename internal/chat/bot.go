@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf16"
 
 	"zonapropbot/internal/repo"
 	"zonapropbot/internal/score"
@@ -237,7 +236,7 @@ func (p *Poller) confirmRatingOnCard(ctx context.Context, chatID string, msg *te
 		return
 	}
 	caption := msg.Caption + "\n\n" + ratingNote(label)
-	if utf16LenOf(caption) > maxCaptionUnits {
+	if telegram.UTF16Len(caption) > telegram.CaptionLimit {
 		// The note does not fit; the toast and the revoked keyboard still apply.
 		p.logf("chat: caption for message %d is full, skipping the rating note", msg.MessageID)
 		return
@@ -249,7 +248,6 @@ func (p *Poller) confirmRatingOnCard(ctx context.Context, chatID string, msg *te
 
 // ratingNotePrefix marks a card that already carries a rating note.
 const ratingNotePrefix = "✓"
-const maxCaptionUnits = 1024
 
 func ratingNote(label int) string {
 	if label == 1 {
@@ -257,10 +255,6 @@ func ratingNote(label int) string {
 	}
 	return "✗ no te gustó"
 }
-
-// utf16LenOf counts UTF-16 code units, which is what Telegram's caption limit
-// measures.
-func utf16LenOf(s string) int { return len(utf16.Encode([]rune(s))) }
 
 // parseCallbackData reads "u:<id>" (like) and "d:<id>" (dislike).
 func parseCallbackData(data string) (int, bool) {

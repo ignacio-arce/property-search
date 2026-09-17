@@ -239,8 +239,8 @@ func TestCaptionKeepsURLWhenTruncated(t *testing.T) {
 	l.Title = strings.Repeat("Departamento amplio luminoso ", 200)
 
 	got := caption(model.Delivery{Listing: l})
-	if n := utf16Len(got); n > captionLimit {
-		t.Errorf("caption is %d UTF-16 units, limit is %d", n, captionLimit)
+	if n := UTF16Len(got); n > CaptionLimit {
+		t.Errorf("caption is %d UTF-16 units, limit is %d", n, CaptionLimit)
 	}
 	if !strings.Contains(got, l.CanonicalURL) {
 		t.Error("truncated caption lost the URL")
@@ -254,8 +254,8 @@ func TestCaptionCountsUTF16Units(t *testing.T) {
 	l.Title = strings.Repeat("🏠", 600) // 1200 UTF-16 units on its own
 
 	got := caption(model.Delivery{Listing: l})
-	if n := utf16Len(got); n > captionLimit {
-		t.Errorf("caption is %d UTF-16 units, limit is %d", n, captionLimit)
+	if n := UTF16Len(got); n > CaptionLimit {
+		t.Errorf("caption is %d UTF-16 units, limit is %d", n, CaptionLimit)
 	}
 	if !strings.Contains(got, l.CanonicalURL) {
 		t.Error("caption lost the URL")

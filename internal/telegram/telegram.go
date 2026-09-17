@@ -30,9 +30,9 @@ type imageFetcher interface {
 
 const (
 	defaultMinSendDelay = 2500 * time.Millisecond
-	// captionLimit is Telegram's cap on a photo caption, measured in UTF-16 code
+	// CaptionLimit is Telegram's cap on a photo caption, measured in UTF-16 code
 	// units (an astral-plane emoji counts as two, a rune count does not).
-	captionLimit = 1024
+	CaptionLimit = 1024
 	// maxTitleOnCard keeps the title from crowding out the structured fields. The
 	// description can be thousands of characters long, and truncating the whole
 	// caption would drop the price, the size and the location first.
@@ -166,9 +166,9 @@ func caption(d model.Delivery) string {
 
 	url := l.CanonicalURL
 	// Reserve the URL plus the newline that joins it to the body.
-	budget := captionLimit - utf16Len(url) - 1
+	budget := CaptionLimit - UTF16Len(url) - 1
 	if budget < 1 {
-		return truncateUTF16(url, captionLimit)
+		return truncateUTF16(url, CaptionLimit)
 	}
 
 	body := truncateUTF16(strings.Join(head, "\n"), budget)
@@ -355,14 +355,15 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func utf16Len(s string) int {
+// UTF16Len counts UTF-16 code units, which is the unit Telegram's limits use.
+func UTF16Len(s string) int {
 	return len(utf16.Encode([]rune(s)))
 }
 
 // truncateUTF16 cuts s to at most limit UTF-16 code units without splitting a
 // rune, so a multi-byte character never produces an invalid message.
 func truncateUTF16(s string, limit int) string {
-	if utf16Len(s) <= limit {
+	if UTF16Len(s) <= limit {
 		return s
 	}
 	var b strings.Builder
