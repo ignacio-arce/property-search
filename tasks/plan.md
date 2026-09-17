@@ -87,9 +87,9 @@ Acá va el índice y el orden.
 - [x] V1.6 Verificación E2E (dry-run y Telegram real)
 
 ### Checkpoint V1
-- [ ] Un usuario sembrado recibe sus publicaciones nuevas una sola vez, con botones
-- [ ] Reiniciar el proceso no re-manda nada
-- [ ] El budget de fetch se respeta (log de rate)
+- [x] Un usuario sembrado no recibe el inventario inicial: se baselina, y después recibe solo lo nuevo
+- [x] Reiniciar el proceso no re-manda nada (E2E idempotente)
+- [x] El budget de fetch se respeta (rate=1m0s, un request por ciclo)
 
 ### V2: Califico y el bot lo persiste
 - [x] V2.1 Telegram inbound: long-poll, offset persistido, dead-letter, lease
