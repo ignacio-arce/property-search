@@ -75,3 +75,12 @@ type Delivery struct {
 	Header    string
 	Reasons   []string
 }
+
+// Contact is what a listing's detail page exposes. It lives in model so both the
+// extractor and the persistence layer can use it without importing each other.
+type Contact struct {
+	Phone         string
+	Email         string
+	StreetAddress string
+	Neighbourhood string
+}

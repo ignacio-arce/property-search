@@ -15,6 +15,7 @@ import (
 
 	"zonapropbot/internal/chat"
 	"zonapropbot/internal/config"
+	"zonapropbot/internal/contact"
 	"zonapropbot/internal/db"
 	"zonapropbot/internal/digest"
 	"zonapropbot/internal/fetch"
@@ -129,11 +130,13 @@ func main() {
 	// The poller runs alongside the digest loop: one consumes updates, the other
 	// produces deliveries. They share the process but not their state.
 	if cfg.TelegramBotToken != "" {
+		extractor := &contact.Extractor{Repo: rp, Fetcher: fc, Notifier: nt, Logger: logger}
 		poller := &chat.Poller{
-			Repo:   repo.New(pool),
-			API:    nt,
-			Logger: logger,
-			Holder: pollerHolder(),
+			Repo:     rp,
+			API:      nt,
+			Logger:   logger,
+			Contacts: extractor,
+			Holder:   pollerHolder(),
 		}
 		go func() {
 			if err := poller.Run(ctx); err != nil {

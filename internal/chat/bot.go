@@ -39,11 +39,19 @@ type API interface {
 	SendText(ctx context.Context, chatID, text string) error
 }
 
+// ContactResolver resolves the advertiser's phone for a liked listing. It is
+// optional: without it, a thumbs-up still records the rating and the link was
+// already on the card.
+type ContactResolver interface {
+	OnLike(ctx context.Context, userID, chatID, listingID int64) error
+}
+
 // Poller consumes updates and dispatches them.
 type Poller struct {
-	Repo   *repo.Repo
-	API    API
-	Logger *log.Logger
+	Repo     *repo.Repo
+	API      API
+	Logger   *log.Logger
+	Contacts ContactResolver
 	// Holder identifies this process for the poll lease.
 	Holder string
 	// Now is overridable so tests can exercise the late-tap window.
@@ -191,10 +199,28 @@ func (p *Poller) handleCallback(ctx context.Context, cq *telegram.CallbackQuery)
 	if err := p.Repo.RecordRating(ctx, userID, listingID, label); err != nil {
 		return err
 	}
+	// Answer before doing any network work: the detail fetch can take seconds, and
+	// the user's client gives up long before that.
 	if err := p.API.AnswerCallbackQuery(ctx, cq.ID, ratingAcknowledgement(label)); err != nil {
 		return err
 	}
-	return p.API.ClearRatingKeyboard(ctx, chatID, cq.Message.MessageID)
+	if err := p.API.ClearRatingKeyboard(ctx, chatID, cq.Message.MessageID); err != nil {
+		return err
+	}
+
+	if label == 1 && p.Contacts != nil {
+		// Run it detached so a slow detail page cannot stall the update loop for
+		// every other user. The context is kept (not cancelled) because the fetch
+		// should finish even if this update's handling returns.
+		chatIDNum := cq.Message.Chat.ID
+		go func() {
+			detached := context.WithoutCancel(ctx)
+			if err := p.Contacts.OnLike(detached, userID, chatIDNum, listingID); err != nil {
+				p.logf("chat: contact for listing %d: %v", listingID, err)
+			}
+		}()
+	}
+	return nil
 }
 
 // parseCallbackData reads "u:<id>" (like) and "d:<id>" (dislike).

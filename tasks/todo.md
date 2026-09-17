@@ -503,42 +503,56 @@ funcionado. Ahora devuelve error si no afectó filas, y `/addurl` asegura el usu
 
 ---
 
-## V6: Al 👍 me manda el teléfono
+## V6: Al 👍 me manda el teléfono ✅
 
-### V6.1 Parser de JSON-LD + `listing_contacts`
+### V6.1 Parser de JSON-LD + `listing_contacts` ✅
 **Descripción:** Extraer el teléfono del JSON-LD del detalle, que es HTML estático.
 
 **Acceptance criteria:**
-- [ ] Parseo del bloque `application/ld+json` con `@type: Apartment`: `telephone`,
-      `numberOfRooms`, `numberOfBedrooms`, `numberOfBathroomsTotal`, `floorSize{value,unitCode}`,
-      `address`, `image`
-- [ ] `listing_contacts` con `fetched_at` y **TTL de 30 días**
-- [ ] "Sin teléfono" es el camino normal, no un error
-- [ ] Fixture: `fixtures/detail_ldjson.json`
+- [x] Parseo de los bloques `application/ld+json` buscando el `Apartment`/`House`; un bloque
+      corrupto no corta el escaneo
+- [x] `telephone` normalizado a dígitos con `+` inicial; menos de 8 dígitos se descarta
+- [x] **No hay email**: la página real solo tiene placeholders y direcciones de Zonaprop, así que la
+      feature manda **teléfono o nada**
+- [x] Bonus del mismo bloque: `streetAddress` y `addressRegion` (barrio), que el card no expone
+- [x] `listing_contacts` con **TTL de 30 días**; un resultado vacío también se cachea, para que un
+      futuro 👍 no gaste otro request
+- [x] Fixture: `fixtures/detail_ldjson.json`
 
-**Verificación:** test contra el fixture; test de ausencia de teléfono
+**Verificación:** `TestFromJSONLDReadsTheListingBlock`, `TestFromJSONLDWithoutAListingBlock`,
+`TestNormalizePhone`
 **Dependencias:** V1.4, V2.2
-**Archivos:** `internal/contact/*.go`, `fixtures/detail_ldjson.json`, `migrations/`
+**Archivos:** `internal/contact/contact.go`, `internal/repo/contacts.go`, `migrations/0005_*`,
+`internal/model/snapshot.go` (`model.Contact`, movido ahí para no crear un ciclo repo↔contact)
 **Alcance:** S
 
-### V6.2 Flujo de contacto
+### V6.2 Flujo de contacto ✅
 **Descripción:** El link va primero; el teléfono es un bonus que puede no llegar.
 
 **Acceptance criteria:**
-- [ ] Al 👍: manda el **link inmediato**, luego intenta la extracción
-- [ ] **Segundo mensaje solo si se encontró teléfono**
-- [ ] Un GET **sin reintentos** con cliente propio; carril prioritario; sin reintento tras challenge
-- [ ] Un 500 por challenge deja al usuario con el link igual
-- [ ] Si ya existe `label=1`, no se re-ejecuta nada
+- [x] El 👍 **responde primero** y después trabaja: el fetch del detalle tarda segundos y el cliente
+      del usuario se rinde mucho antes
+- [x] La extracción corre **destacada** (`context.WithoutCancel` + goroutine), así una página lenta
+      no bloquea el loop de updates de los demás
+- [x] **Segundo mensaje solo si hay teléfono**; "no encontrado" es el camino normal
+- [x] Un GET con `Priority: true` y `NoRetries: true`
+- [x] Un challenge en el detalle **no rompe nada**: el rating ya está registrado y el link ya estaba
+      en la tarjeta
+- [x] Si ya existe `label=1`, no se re-ejecuta nada (first-tap-wins de V2.2)
 
-**Verificación:** prueba manual del flujo; test con challenge simulado
+**Verificación:** `TestOnLikeSendsThePhoneFromTheDetailPage`, `TestOnLikeWithoutAPhoneSaysNothing`,
+`TestOnLikeUsesTheCacheInsteadOfRefetching`, `TestOnLikeSurvivesADetailFetchFailure`
 **Dependencias:** V6.1
-**Archivos:** `internal/chat/callbacks.go`, `internal/contact/*.go`
+**Archivos:** `internal/contact/extractor.go`, `internal/chat/bot.go`, `cmd/bot/main.go`
 **Alcance:** S
 
 ### Checkpoint V6
-- [ ] Un 👍 manda el link al instante y el teléfono si aparece
-- [ ] Un fallo de challenge no deja al usuario sin nada
+- [x] Un 👍 manda el link al instante (ya estaba en la tarjeta) y el teléfono si aparece
+- [x] Un fallo de challenge no deja al usuario sin nada
+
+**Pendiente de verificación real:** que el `telephone` del JSON-LD **varíe por publicación**. La
+sonda A2 no pudo medir un segundo detalle (challenge). Si resultara un número genérico, V6 se degrada
+a "manda solo el link" sin romper nada.
 
 ---
 

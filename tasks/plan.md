@@ -131,12 +131,12 @@ Acá va el índice y el orden.
 - [x] El usuario sabe que las notificaciones no arrancan hasta que lo activen
 
 ### V6: Al 👍 me manda el teléfono
-- [ ] V6.1 Parser de JSON-LD + `listing_contacts` con TTL
-- [ ] V6.2 Flujo: link primero, intento después, segundo mensaje solo si hay teléfono
+- [x] V6.1 Parser de JSON-LD + `listing_contacts` con TTL
+- [x] V6.2 Flujo: link primero, intento después, segundo mensaje solo si hay teléfono
 
 ### Checkpoint V6
-- [ ] Un 👍 manda el link al instante y el teléfono si aparece
-- [ ] Un fallo de challenge no deja al usuario sin nada
+- [x] Un 👍 manda el link al instante y el teléfono si aparece
+- [x] Un fallo de challenge no deja al usuario sin nada
 
 ### V7: Preparación de deploy y cierre
 - [ ] V7.1 Compose final
