@@ -10,6 +10,7 @@ import (
 
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -59,6 +60,10 @@ func main() {
 	defer stop()
 
 	logger := log.New(os.Stdout, "", log.LstdFlags)
+
+	// The poller runs in a goroutine and must finish before the pool closes, so its
+	// lease release does not fail against a dead connection.
+	var pollerWG sync.WaitGroup
 
 	pool, err := db.Open(ctx, cfg.DatabaseURL(), db.Options{Logger: logger})
 	if err != nil {
@@ -138,7 +143,9 @@ func main() {
 			Contacts: extractor,
 			Holder:   pollerHolder(),
 		}
+		pollerWG.Add(1)
 		go func() {
+			defer pollerWG.Done()
 			if err := poller.Run(ctx); err != nil {
 				logger.Printf("chat: poller stopped: %v", err)
 			}
@@ -173,6 +180,11 @@ func main() {
 	if err := scheduler.Run(ctx, loc, hour, minute, dailyRun, logger, time.Now); err != nil {
 		logger.Printf("digest: scheduler stopped: %v", err)
 	}
+
+	// Cancel and wait for the poller before returning: its deferred release of the
+	// poll lease needs a live pool, and the deferred pool.Close runs after this.
+	stop()
+	pollerWG.Wait()
 	logger.Println("signal received, shutting down")
 }
 
