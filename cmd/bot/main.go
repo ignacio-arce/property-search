@@ -192,6 +192,7 @@ func (a *app) startPoller(ctx context.Context) {
 		Repo:   a.repo,
 		API:    a.notify,
 		Logger: a.logger,
+		Search: a.digest,
 		Contacts: &contact.Extractor{
 			Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.logger,
 		},
