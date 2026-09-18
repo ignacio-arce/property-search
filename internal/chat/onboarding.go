@@ -41,7 +41,8 @@ func (p *Poller) startOnboarding(ctx context.Context, userID, chatID int64) erro
 	if err != nil {
 		return err
 	}
-	if user == nil {
+	isNew := user == nil
+	if isNew {
 		if err := p.Repo.EnsureUser(ctx, userID, chatID); err != nil {
 			return err
 		}
@@ -49,6 +50,7 @@ func (p *Poller) startOnboarding(ctx context.Context, userID, chatID int64) erro
 	if err := p.Repo.SetUserState(ctx, userID, stateAwaitURL, nil); err != nil {
 		return err
 	}
+	p.Logger.Info("chat: /start", "user", userID, "new", isNew)
 
 	return p.API.SendText(ctx, formatID(chatID), strings.Join([]string{
 		"👋 Soy un buscador de propiedades que aprende de tus gustos.",
@@ -153,6 +155,7 @@ func (p *Poller) completeSearchWithLabel(ctx context.Context, userID int64, chat
 	if err := p.Repo.SetUserState(ctx, userID, stateReady, nil); err != nil {
 		return err
 	}
+	p.Logger.Info("chat: search added", "user", userID, "label", label)
 
 	return p.API.SendText(ctx, chat, p.afterRegistrationText(ctx, userID, label))
 }
@@ -249,6 +252,7 @@ func (p *Poller) removeURL(ctx context.Context, userID int64, chat, label string
 	if !removed {
 		return p.API.SendText(ctx, chat, fmt.Sprintf("No encontré una búsqueda llamada `%s`. Mirá /list.", label))
 	}
+	p.Logger.Info("chat: search removed", "user", userID, "label", label)
 	return p.API.SendText(ctx, chat, fmt.Sprintf("Listo, borré `%s`.", label))
 }
 
@@ -259,6 +263,7 @@ func (p *Poller) setStopped(ctx context.Context, userID int64, chat string, stop
 	if err := p.Repo.SetUserStopped(ctx, userID, stopped); err != nil {
 		return err
 	}
+	p.Logger.Info("chat: notifications stopped", "user", userID, "stopped", stopped)
 	if stopped {
 		return p.API.SendText(ctx, chat, "Listo, pausé las notificaciones. Tus datos y calificaciones quedan guardados; /start reanuda.")
 	}
@@ -272,6 +277,7 @@ func (p *Poller) deleteEverything(ctx context.Context, userID int64, chat string
 	if err := p.Repo.DeleteUser(ctx, userID); err != nil {
 		return err
 	}
+	p.Logger.Info("chat: user data deleted", "user", userID)
 	return p.API.SendText(ctx, chat, "Borré tus búsquedas, entregas y calificaciones. Si querés empezar de nuevo, mandá /start.")
 }
 

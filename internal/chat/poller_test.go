@@ -3,14 +3,13 @@ package chat
 import (
 	"context"
 	"errors"
-	"io"
-	"log"
 	"sync"
 	"testing"
 	"time"
 
 	"zonapropbot/internal/db"
 	"zonapropbot/internal/dbtest"
+	"zonapropbot/internal/logging"
 	"zonapropbot/internal/repo"
 	"zonapropbot/internal/telegram"
 )
@@ -60,7 +59,7 @@ func newPollerWithAPI(t *testing.T, api API, holder string) (*Poller, *repo.Repo
 		t.Fatalf("migrate: %v", err)
 	}
 	r := repo.New(pool)
-	return &Poller{Repo: r, API: api, Logger: log.New(io.Discard, "", 0), Holder: holder}, r
+	return &Poller{Repo: r, API: api, Logger: logging.Discard(), Holder: holder}, r
 }
 
 func TestPollerPersistsOffset(t *testing.T) {
@@ -77,7 +76,7 @@ func TestPollerPersistsOffset(t *testing.T) {
 			Text: "/help",
 		}},
 	}}
-	p := &Poller{Repo: r, API: api, Logger: log.New(io.Discard, "", 0), Holder: "test"}
+	p := &Poller{Repo: r, API: api, Logger: logging.Discard(), Holder: "test"}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

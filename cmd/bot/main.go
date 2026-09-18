@@ -198,7 +198,7 @@ func (a *app) startPoller(ctx context.Context) {
 	poller := &chat.Poller{
 		Repo:   a.repo,
 		API:    a.notify,
-		Logger: a.legacy,
+		Logger: a.logger,
 		Contacts: &contact.Extractor{
 			Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.legacy,
 		},

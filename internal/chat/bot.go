@@ -12,7 +12,7 @@ import (
 	"context"
 
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +51,7 @@ type ContactResolver interface {
 type Poller struct {
 	Repo     *repo.Repo
 	API      API
-	Logger   *log.Logger
+	Logger   *slog.Logger
 	Contacts ContactResolver
 	// Holder identifies this process for the poll lease.
 	Holder string
@@ -83,7 +83,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := p.Repo.ReleasePollLease(releaseCtx, p.Holder); err != nil && releaseCtx.Err() == nil {
-			p.logf("chat: releasing poll lease: %v", err)
+			p.Logger.Warn("chat: releasing poll lease failed", "err", err)
 		}
 	}()
 
@@ -91,7 +91,7 @@ func (p *Poller) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	p.logf("chat: polling from offset %d", offset)
+	p.Logger.Info("chat: polling from offset", "offset", offset)
 
 	failures := 0
 	var failingID int64
@@ -106,7 +106,7 @@ func (p *Poller) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			p.logf("chat: getUpdates: %v", err)
+			p.Logger.Warn("chat: getUpdates failed", "err", err)
 			if err := sleep(ctx, 3*time.Second); err != nil {
 				return nil
 			}
@@ -125,13 +125,14 @@ func (p *Poller) Run(ctx context.Context) error {
 					// Stop the batch instead of skipping ahead: processing later
 					// updates would reorder them, and this one is re-delivered by the
 					// next poll.
-					p.logf("chat: update %d failed (attempt %d/%d): %v", u.UpdateID, failures, maxAttemptsPerUpdate, err)
+					p.Logger.Warn("chat: update failed", "update", u.UpdateID, "attempt", failures,
+						"max_attempts", maxAttemptsPerUpdate, "err", err)
 					needsRetry = true
 					break
 				}
 				// Dead-letter: a handler that always fails must not block every other
 				// user's updates until Telegram's 24h retention drops them silently.
-				p.logf("chat: DEAD-LETTER update %d after %d attempts: %v", u.UpdateID, failures, err)
+				p.Logger.Warn("chat: DEAD-LETTER update", "update", u.UpdateID, "attempts", failures, "err", err)
 			}
 
 			// Persisted after the handler, so a crash replays instead of dropping.
@@ -207,6 +208,7 @@ func (p *Poller) handleCallback(ctx context.Context, cq *telegram.CallbackQuery)
 	if err := p.Repo.RecordRating(ctx, userID, listingID, label); err != nil {
 		return err
 	}
+	p.Logger.Info("chat: rating recorded", "user", userID, "listing", listingID, "label", label)
 	// A toast is easy to miss and lasts seconds, so the rating is also written onto
 	// the card itself.
 	p.confirmRatingOnCard(ctx, chatID, cq.Message, label)
@@ -222,7 +224,7 @@ func (p *Poller) handleCallback(ctx context.Context, cq *telegram.CallbackQuery)
 		go func() {
 			detached := context.WithoutCancel(ctx)
 			if err := p.Contacts.OnLike(detached, userID, chatIDNum, listingID); err != nil {
-				p.logf("chat: contact for listing %d: %v", listingID, err)
+				p.Logger.Warn("chat: contact on like failed", "listing", listingID, "err", err)
 			}
 		}()
 	}
@@ -238,11 +240,11 @@ func (p *Poller) confirmRatingOnCard(ctx context.Context, chatID string, msg *te
 	caption := msg.Caption + "\n\n" + ratingNote(label)
 	if telegram.UTF16Len(caption) > telegram.CaptionLimit {
 		// The note does not fit; the toast and the revoked keyboard still apply.
-		p.logf("chat: caption for message %d is full, skipping the rating note", msg.MessageID)
+		p.Logger.Debug("chat: caption full, skipping the rating note", "message", msg.MessageID)
 		return
 	}
 	if err := p.API.EditMessageCaption(ctx, chatID, msg.MessageID, caption); err != nil {
-		p.logf("chat: could not write the rating note on message %d: %v", msg.MessageID, err)
+		p.Logger.Warn("chat: could not write the rating note", "message", msg.MessageID, "err", err)
 	}
 }
 
@@ -371,12 +373,6 @@ func helpText() string {
 		"/borrardatos — borrar todo lo tuyo",
 		"/help — este mensaje",
 	}, "\n")
-}
-
-func (p *Poller) logf(format string, args ...any) {
-	if p.Logger != nil {
-		p.Logger.Printf(format, args...)
-	}
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

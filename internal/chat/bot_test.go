@@ -1,10 +1,10 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"log"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +13,7 @@ import (
 
 	"zonapropbot/internal/db"
 	"zonapropbot/internal/dbtest"
+	"zonapropbot/internal/logging"
 	"zonapropbot/internal/repo"
 	"zonapropbot/internal/telegram"
 )
@@ -59,7 +60,26 @@ func newTestPoller(t *testing.T) (*Poller, *fakeAPI, *repo.Repo, *pgxpool.Pool) 
 	}
 	r := repo.New(pool)
 	api := &fakeAPI{}
-	return &Poller{Repo: r, API: api, Logger: log.New(io.Discard, "", 0)}, api, r, pool
+	return &Poller{Repo: r, API: api, Logger: logging.Discard()}, api, r, pool
+}
+
+// Onboarding starts are the operator's only signal that someone new arrived, so
+// the line must say who and whether the account is new.
+func TestStartOnboardingLogsNewUser(t *testing.T) {
+	p, _, _, _ := newTestPoller(t)
+	var buf bytes.Buffer
+	p.Logger = logging.New(&buf, slog.LevelInfo)
+
+	if err := p.startOnboarding(context.Background(), 42, 42); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{"chat: /start", "user=42", "new=true"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("start log %q does not contain %q", out, want)
+		}
+	}
 }
 
 // delivered inserts a user, a listing and a delivery, returning the listing id.
