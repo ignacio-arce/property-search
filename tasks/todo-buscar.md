@@ -21,14 +21,14 @@ tarjeta dos veces. Agregar un lock por usuario dentro del `Runner` (patrón `syn
 serialicen entre sí.
 
 **Acceptance criteria:**
-- [ ] `RunForUser` toma un lock por `userID` y lo libera siempre (incluso en error)
-- [ ] Dos `RunForUser` concurrentes del mismo usuario no duplican entregas
-- [ ] Usuarios distintos no se bloquean entre sí
-- [ ] Los tests existentes de digest siguen verdes
+- [x] `RunForUser` toma un lock por `userID` y lo libera siempre (incluso en error)
+- [x] Dos `RunForUser` concurrentes del mismo usuario no duplican entregas
+- [x] Usuarios distintos no se bloquean entre sí
+- [x] Los tests existentes de digest siguen verdes
 
 **Verificación:**
-- [ ] `nix develop -c go test ./internal/digest/`
-- [ ] `nix develop -c go build ./...`
+- [x] `nix develop -c go test ./internal/digest/`
+- [x] `nix develop -c go build ./...`
 
 **Dependencias:** Ninguna
 
@@ -47,15 +47,15 @@ aislamiento de fallos por búsqueda. Documentar que el `Gate` sigue pacingando, 
 tiempo total.
 
 **Acceptance criteria:**
-- [ ] Una corrida con 2+ búsquedas las indexa concurrentemente (ninguna espera el round-trip de la otra)
-- [ ] El resumen `digest: user done` conserva `searches`, `fetched`, `candidates`, `sent`, `ms`
-- [ ] Un fallo de una búsqueda no aborta las demás
-- [ ] El baseline por búsqueda sigue ocurriendo una sola vez por búsqueda
-- [ ] Test con 2 búsquedas verifica que ambas quedan indexadas
+- [x] Una corrida con 2+ búsquedas las indexa concurrentemente (ninguna espera el round-trip de la otra)
+- [x] El resumen `digest: user done` conserva `searches`, `fetched`, `candidates`, `sent`, `ms`
+- [x] Un fallo de una búsqueda no aborta las demás
+- [x] El baseline por búsqueda sigue ocurriendo una sola vez por búsqueda
+- [x] Test con 2 búsquedas verifica que ambas quedan indexadas
 
 **Verificación:**
-- [ ] `nix develop -c go test ./internal/digest/`
-- [ ] `nix develop -c go build ./...`
+- [x] `nix develop -c go test ./internal/digest/`
+- [x] `nix develop -c go build ./...`
 
 **Dependencias:** Task 1
 
@@ -68,8 +68,8 @@ tiempo total.
 ---
 
 ## Checkpoint: Digest
-- [ ] `nix develop -c go test ./internal/digest/` verde
-- [ ] Sin doble envío en el test concurrente
+- [x] `nix develop -c go test ./internal/digest/` verde
+- [x] Sin doble envío en el test concurrente
 
 ---
 
@@ -83,19 +83,19 @@ válidas → tope de 1/hora. Si todo pasa, responde `🔎 Buscando ahora…` y c
 al terminar manda resultado. Actualizar `/help`.
 
 **Acceptance criteria:**
-- [ ] `/buscar` sin usuario responde guiando a `/start`
-- [ ] `state='stopped'` responde que está pausado y **no** corre
-- [ ] `active=false` responde que está deshabilitado y **no** corre
-- [ ] Sin búsquedas válidas responde que todavía no hay y **no** corre
-- [ ] Segundo `/buscar` dentro de la hora no corre y avisa cuándo reintentar
-- [ ] Happy path: responde el ack, corre detachado y manda `Listo, te mandé N nuevas` (o `No hay publicaciones nuevas`)
-- [ ] El handler retorna sin esperar a que la corrida termine (no bloquea el poll loop)
-- [ ] `/help` incluye `/buscar`
+- [x] `/buscar` sin usuario responde guiando a `/start`
+- [x] `state='stopped'` responde que está pausado y **no** corre
+- [x] `active=false` responde que está deshabilitado y **no** corre
+- [x] Sin búsquedas válidas responde que todavía no hay y **no** corre
+- [x] Segundo `/buscar` dentro de la hora no corre y avisa cuándo reintentar
+- [x] Happy path: responde el ack, corre detachado y manda `Listo, te mandé N nuevas` (o `No hay publicaciones nuevas`)
+- [x] El handler retorna sin esperar a que la corrida termine (no bloquea el poll loop)
+- [x] `/help` incluye `/buscar`
 
 **Verificación:**
-- [ ] `nix develop -c go test ./internal/chat/`
-- [ ] `nix develop -c go build ./...`
-- [ ] Test con `SearchRunner` falso: gates, tope, ack y resultado
+- [x] `nix develop -c go test ./internal/chat/`
+- [x] `nix develop -c go build ./...`
+- [x] Test con `SearchRunner` falso: gates, tope, ack y resultado
 
 **Dependencias:** Ninguna (usa lead falsa en tests)
 
@@ -113,12 +113,12 @@ al terminar manda resultado. Actualizar `/help`.
 ya cumple la firma.
 
 **Acceptance criteria:**
-- [ ] `main` construye el `Poller` con `Search: a.digest`
-- [ ] `go vet` sin avisos
+- [x] `main` construye el `Poller` con `Search: a.digest`
+- [x] `go vet` sin avisos
 
 **Verificación:**
-- [ ] `nix develop -c go build ./...`
-- [ ] `nix develop -c go vet ./...`
+- [x] `nix develop -c go build ./...`
+- [x] `nix develop -c go vet ./...`
 
 **Dependencias:** Task 1, Task 2, Task 3
 
@@ -130,8 +130,8 @@ ya cumple la firma.
 ---
 
 ## Checkpoint: Comando
-- [ ] Tests de `chat` y `digest` verdes
-- [ ] `go build ./...` y `go vet ./...` limpios
+- [x] Tests de `chat` y `digest` verdes
+- [x] `go build ./...` y `go vet ./...` limpios
 
 ---
 
@@ -142,12 +142,12 @@ ya cumple la firma.
 con tope de 1/hora, sin cambiar la corrida diaria.
 
 **Acceptance criteria:**
-- [ ] README menciona `/buscar` y su semántica (inmediato, 1/hora, no reemplaza la diaria)
-- [ ] `go test ./...` no cambia
+- [x] README menciona `/buscar` y su semántica (inmediato, 1/hora, no reemplaza la diaria)
+- [x] `go test ./...` no cambia
 
 **Verificación:**
-- [ ] Revisión humana
-- [ ] `nix develop -c go test ./...`
+- [x] Revisión humana
+- [x] `nix develop -c go test ./...`
 
 **Dependencias:** Task 3
 
@@ -159,6 +159,6 @@ con tope de 1/hora, sin cambiar la corrida diaria.
 ---
 
 ## Checkpoint: Complete
-- [ ] `nix develop -c go test ./...` verde
-- [ ] `gofmt -l .` vacío y `go vet ./...` limpio
+- [x] `nix develop -c go test ./...` verde
+- [x] `gofmt -l .` vacío y `go vet ./...` limpio
 - [ ] Drill manual en base descartable: `/buscar` responde, corre y reporta (sin tocar producción)
