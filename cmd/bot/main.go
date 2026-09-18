@@ -63,6 +63,7 @@ func main() {
 
 	app := newApp(cfg, pool, logger)
 	app.logStartup()
+	app.setupMenu(ctx)
 	if err := app.retrainAll(ctx); err != nil {
 		fatal(logger, "retrain", err)
 	}
@@ -140,6 +141,31 @@ func (a *app) logStartup() {
 		"proxy", onOff(a.cfg.ZonapropProxy),
 		"rate", a.cfg.FetchRateLimit,
 		"dry_run", a.cfg.TelegramBotToken == "")
+}
+
+// setupMenu publishes the command list Telegram shows next to the message field,
+// so every option is reachable without typing. It is best effort: the menu is a
+// convenience, and a rejection from the Bot API must not stop the bot from
+// delivering listings.
+func (a *app) setupMenu(ctx context.Context) {
+	if a.cfg.TelegramBotToken == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	commands := chat.BotCommands()
+	if err := a.notify.SetMyCommands(ctx, commands); err != nil {
+		a.logger.Warn("chat: setMyCommands failed", "err", err)
+		// Do not repoint the button at a list we failed to publish: it would open
+		// empty (or stale), which is worse than whatever it does today.
+		return
+	}
+	if err := a.notify.SetChatMenuButton(ctx); err != nil {
+		a.logger.Warn("chat: setChatMenuButton failed", "err", err)
+		return
+	}
+	a.logger.Info("chat: command menu published", "commands", len(commands))
 }
 
 // retrainAll rebuilds every active user's model at boot, until the nightly job
