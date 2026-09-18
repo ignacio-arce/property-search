@@ -20,6 +20,7 @@ import (
 
 	"zonapropbot/internal/config"
 	"zonapropbot/internal/fetch"
+	"zonapropbot/internal/logging"
 	"zonapropbot/internal/parser"
 )
 
@@ -36,7 +37,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	client := fetch.New(cfg)
+	client := fetch.New(cfg, fetch.WithLogger(logging.New(os.Stdout, cfg.LogLevel)))
 	ctx := context.Background()
 
 	for _, u := range flag.Args() {

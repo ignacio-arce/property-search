@@ -115,7 +115,7 @@ type app struct {
 }
 
 func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) *app {
-	fetcher := fetch.New(cfg)
+	fetcher := fetch.New(cfg, fetch.WithLogger(logger))
 	notifier := telegram.New(cfg, imageDownloader{fc: fetcher}, os.Stdout)
 	repository := repo.New(pool)
 	return &app{
