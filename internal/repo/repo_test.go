@@ -18,6 +18,29 @@ func newRepo(t *testing.T) *repo.Repo {
 	return repo.New(pool)
 }
 
+// New users must be born active so the digest reaches them without an operator
+// toggling the switch by hand (testing default).
+func TestEnsureUserCreatesActiveUser(t *testing.T) {
+	r := newRepo(t)
+	ctx := context.Background()
+
+	const user int64 = 123
+	if err := r.EnsureUser(ctx, user, user); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := r.GetUser(ctx, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("user was not created")
+	}
+	if !got.Active {
+		t.Error("new user is not active, want active by default")
+	}
+}
+
 func TestSearchURLsAreScopedPerUser(t *testing.T) {
 	r := newRepo(t)
 	ctx := context.Background()
