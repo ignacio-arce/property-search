@@ -290,6 +290,51 @@ func TestConcurrentRunsForTheSameUserAreSerialized(t *testing.T) {
 	<-secondDone
 }
 
+// The lock is per user: one user's run must not block another's.
+func TestRunsForDifferentUsersDoNotBlockEachOther(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	ctx := context.Background()
+
+	if _, err := r.Pool().Exec(ctx,
+		`INSERT INTO users (user_id, chat_id, state, active) VALUES (2, 2, 'ready', true)`); err != nil {
+		t.Fatal(err)
+	}
+	id, err := r.AddSearchURL(ctx, 2, "search-b", searchB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Pool().Exec(ctx,
+		`UPDATE search_urls SET validation_status = 'valid' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa"), searchB: page("bbb")}}
+	var arrived atomic.Int32
+	both := make(chan struct{})
+	f.onFetch = func() {
+		if arrived.Add(1) == 2 {
+			close(both)
+		}
+		select {
+		case <-both:
+		case <-time.After(3 * time.Second):
+		}
+	}
+
+	runner := newRunner(r, f, &recordingNotifier{})
+	done := make(chan struct{}, 2)
+	go func() { defer func() { done <- struct{}{} }(); _, _ = runner.RunForUser(ctx, 1, 1) }()
+	go func() { defer func() { done <- struct{}{} }(); _, _ = runner.RunForUser(ctx, 2, 2) }()
+
+	select {
+	case <-both:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a run for one user blocked the run for another")
+	}
+	<-done
+	<-done
+}
+
 // A run indexes its searches in parallel: the second fetch must be in flight
 // before the first returns, otherwise they are being done one after another.
 func TestSearchesAreIndexedInParallel(t *testing.T) {
