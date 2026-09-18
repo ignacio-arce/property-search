@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"zonapropbot/internal/repo"
@@ -53,10 +54,17 @@ type Poller struct {
 	API      API
 	Logger   *slog.Logger
 	Contacts ContactResolver
+	// Search runs a user's digest on demand for /buscar. It is optional: without
+	// it, the command answers that it cannot run right now.
+	Search SearchRunner
 	// Holder identifies this process for the poll lease.
 	Holder string
 	// Now is overridable so tests can exercise the late-tap window.
 	Now func() time.Time
+
+	// lastSearch records the last manual run per user for the /buscar cooldown.
+	// It is in-memory on purpose: the cooldown does not survive a restart.
+	lastSearch sync.Map // userID -> time.Time
 }
 
 func (p *Poller) now() time.Time {
@@ -315,6 +323,8 @@ func (p *Poller) handleMessage(ctx context.Context, msg *telegram.Message) error
 		return p.removeURL(ctx, msg.From.ID, chatID, label)
 	case "/stop":
 		return p.setStopped(ctx, msg.From.ID, chatID, true)
+	case "/buscar":
+		return p.search(ctx, msg.From.ID, msg.Chat.ID, chatID)
 	case "/borrardatos":
 		return p.deleteEverything(ctx, msg.From.ID, chatID)
 	default:
@@ -370,6 +380,7 @@ func helpText() string {
 		"/list — ver tus búsquedas y su estado",
 		"/model — qué aprendió de tus calificaciones",
 		"/stop — pausar las notificaciones",
+		"/buscar — buscar publicaciones nuevas ahora",
 		"/borrardatos — borrar todo lo tuyo",
 		"/help — este mensaje",
 	}, "\n")
