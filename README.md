@@ -26,6 +26,9 @@ contra Zonaprop es el recurso escaso.
 7. **`/buscar`** dispara la búsqueda **en el momento** sin esperar las 09:00, con un tope de una vez
    por hora por usuario. No cambia el switch del operador ni la corrida diaria: es una corrida extra
    a pedido. La diaria de las 09:00 sigue funcionando igual.
+8. El bot publica sus comandos en Telegram, así que aparecen en el **botón de menú junto al campo de
+   texto** (y al escribir `/`) con su descripción. Tocar una opción manda el comando: no hace falta
+   memorizarlos, y todos siguen disponibles a mano.
 
 ## Estado del despliegue
 

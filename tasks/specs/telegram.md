@@ -90,6 +90,23 @@ ni duplica nada. Hoy `internal/telegram` solo envía y tiene un único `chat_id`
       datos conservados, alerta única al operador. Sin esto, cada mañana se re-fetchan 15 páginas
       de Zonaprop para un usuario que ya no existe y se reintentan N envíos que fallan, para siempre.
 
+## D5 — Menú lateral de comandos
+
+- AC: `setMyCommands` publica el catálogo (`chat.BotCommands`) para que Telegram lo muestre al
+      escribir `/` y en el **botón de menú junto al campo de texto**. Las descripciones en
+      castellano salen de un único catálogo, y `helpText()` sigue siendo la vista de ayuda.
+- AC: cada nombre cumple `^[a-z0-9_]{1,32}$` y cada descripción 1-256 caracteres. Una entrada
+      inválida o duplicada hace que el Bot API rechace **toda** la lista, así que el catálogo se
+      valida en test (y el test deriva los comandos de `helpText()` para que menú y ayuda no
+      diverjan en ninguna dirección).
+- AC: `setChatMenuButton` fija el botón en `{"type":"commands"}` para que abra la lista aunque
+      antes apuntara a una Mini App. Es el comportamiento por defecto, pero explícito.
+- AC: la publicación es **best-effort** al arranque: un rechazo del Bot API se loguea WARN y el bot
+      sigue entregando. Sin token (dry-run) no se llama a la red.
+- AC: el menú es **global**, sin scopes por usuario ni por estado. Fue una decisión explícita: las
+      opciones no cambian según el estado, así que un scope por chat solo agregaría llamadas y
+      superficie de fallo.
+
 ## Archivos
 
 `internal/telegram/*.go` (reescribir), `internal/chat/*.go` (nuevo: router de updates),
