@@ -2,8 +2,6 @@ package digest_test
 
 import (
 	"context"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +12,7 @@ import (
 	"zonapropbot/internal/dbtest"
 	"zonapropbot/internal/digest"
 	"zonapropbot/internal/fetch"
+	"zonapropbot/internal/logging"
 	"zonapropbot/internal/repo"
 )
 
@@ -73,7 +72,7 @@ func TestEndToEndAgainstTheRealPage(t *testing.T) {
 	fc := fetch.New(cfg)
 	notifier := &recordingNotifier{}
 	runner := &digest.Runner{
-		Repo: r, Fetcher: fc, Notifier: notifier, Logger: log.New(io.Discard, "", 0),
+		Repo: r, Fetcher: fc, Notifier: notifier, Logger: logging.Discard(),
 	}
 
 	// First run: the page yields 30 listings and all of them are baselined.

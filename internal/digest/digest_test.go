@@ -1,10 +1,10 @@
 package digest_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"log"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"zonapropbot/internal/dbtest"
 	"zonapropbot/internal/digest"
 	"zonapropbot/internal/fetch"
+	"zonapropbot/internal/logging"
 	"zonapropbot/internal/model"
 	"zonapropbot/internal/repo"
 )
@@ -110,7 +111,7 @@ func fixture(t *testing.T, userID, chatID int64, searches ...string) *repo.Repo 
 }
 
 func newRunner(r *repo.Repo, f *fakeFetcher, n *recordingNotifier) *digest.Runner {
-	return &digest.Runner{Repo: r, Fetcher: f, Notifier: n, Logger: log.New(io.Discard, "", 0)}
+	return &digest.Runner{Repo: r, Fetcher: f, Notifier: n, Logger: logging.Discard()}
 }
 
 // The first index of a search is baselined, not sent: replaying the whole current
@@ -164,6 +165,77 @@ func TestRepeatedRunIsSilent(t *testing.T) {
 	}
 	if len(n.sent) != 0 {
 		t.Errorf("nothing should have been sent, got %v", n.ids())
+	}
+}
+
+// The per-user summary is the line the operator reads to answer "why did nothing
+// arrive today", so it must carry the funnel counts.
+func TestRunForUserLogsTheFunnelSummary(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa", "bbb")}}
+	n := &recordingNotifier{}
+	var buf bytes.Buffer
+	runner := &digest.Runner{
+		Repo: r, Fetcher: f, Notifier: n,
+		Logger: logging.New(&buf, slog.LevelInfo),
+	}
+	ctx := context.Background()
+
+	// First run baselines the two listings.
+	if _, err := runner.RunForUser(ctx, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+
+	// A new listing appears; this run must send exactly one.
+	f.pages[searchA] = page("aaa", "bbb", "ccc")
+	if _, err := runner.RunForUser(ctx, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "digest: user done") {
+		t.Fatalf("summary line missing: %q", out)
+	}
+	for _, want := range []string{"user=1", "searches=1", "fetched=1", "candidates=1", "sent=1", "ms="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary %q does not contain %q", out, want)
+		}
+	}
+	if strings.Contains(out, "cap_hit=true") {
+		t.Errorf("cap_hit should be false without a cap: %q", out)
+	}
+}
+
+// Hitting the per-run cap must be visible: it is the difference between "no more
+// listings" and "more waiting for tomorrow".
+func TestRunForUserReportsCapHit(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa")}}
+	n := &recordingNotifier{}
+	var buf bytes.Buffer
+	runner := &digest.Runner{
+		Repo: r, Fetcher: f, Notifier: n, MaxPerRun: 1,
+		Logger: logging.New(&buf, slog.LevelInfo),
+	}
+	ctx := context.Background()
+
+	if _, err := runner.RunForUser(ctx, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	f.pages[searchA] = page("aaa", "bbb", "ccc")
+	buf.Reset()
+
+	if _, err := runner.RunForUser(ctx, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "cap_hit=true") {
+		t.Errorf("summary must flag the cap: %q", out)
+	}
+	if !strings.Contains(out, "candidates=1") || !strings.Contains(out, "sent=1") {
+		t.Errorf("summary counts wrong with a cap of 1: %q", out)
 	}
 }
 

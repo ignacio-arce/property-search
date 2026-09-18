@@ -133,7 +133,7 @@ func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger, legacy 
 			Repo:      repository,
 			Fetcher:   fetcher,
 			Notifier:  notifier,
-			Logger:    legacy,
+			Logger:    logger,
 			MaxPerRun: cfg.MaxDaily,
 		},
 		logger: logger,

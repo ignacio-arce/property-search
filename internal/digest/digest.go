@@ -11,7 +11,7 @@ package digest
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -37,7 +37,7 @@ type Runner struct {
 	Repo     *repo.Repo
 	Fetcher  Fetcher
 	Notifier Notifier
-	Logger   *log.Logger
+	Logger   *slog.Logger
 	// MaxPerRun caps how many listings are sent in one cycle. 0 means no cap;
 	// the daily cap with carry-over arrives in V4.3.
 	MaxPerRun int
@@ -51,7 +51,7 @@ func (r *Runner) RunAll(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	if len(users) == 0 {
-		r.logf("digest: no active users")
+		r.Logger.Info("digest: no active users")
 	}
 
 	total := 0
@@ -62,7 +62,7 @@ func (r *Runner) RunAll(ctx context.Context) (int, error) {
 		sent, err := r.RunForUser(ctx, u.UserID, u.ChatID)
 		if err != nil {
 			// One user's failure must not stop the others.
-			r.logf("digest: user %d failed: %v", u.UserID, err)
+			r.Logger.Warn("digest: user failed", "user", u.UserID, "err", err)
 			continue
 		}
 		total += sent
@@ -73,12 +73,13 @@ func (r *Runner) RunAll(ctx context.Context) (int, error) {
 // RunForUser fetches the user's searches, indexes new listings and sends the ones
 // the user has not been shown. It returns how many were sent.
 func (r *Runner) RunForUser(ctx context.Context, userID, chatID int64) (int, error) {
+	start := time.Now()
 	searches, err := r.Repo.ListValidSearchURLs(ctx, userID)
 	if err != nil {
 		return 0, err
 	}
 	if len(searches) == 0 {
-		r.logf("digest: user %d has no valid searches", userID)
+		r.Logger.Info("digest: user has no valid searches", "user", userID)
 		return 0, nil
 	}
 
@@ -90,7 +91,8 @@ func (r *Runner) RunForUser(ctx context.Context, userID, chatID int64) (int, err
 		if err := r.indexSearch(ctx, userID, s); err != nil {
 			// A failing URL must not abort the cycle: the remaining searches still
 			// get processed and the failure is logged.
-			r.logf("digest: search %q (%s) failed: %v", s.Label, s.URL, err)
+			r.Logger.Warn("digest: search failed", "user", userID, "label", s.Label, "err", err)
+			r.Logger.Debug("digest: search failed url", "user", userID, "url", s.URL, "err", err)
 			continue
 		}
 		fetched++
@@ -103,7 +105,20 @@ func (r *Runner) RunForUser(ctx context.Context, userID, chatID int64) (int, err
 		return 0, fmt.Errorf("no search could be fetched for user %d (%d configured)", userID, len(searches))
 	}
 
-	return r.sendUndelivered(ctx, userID, chatID)
+	sent, candidates, err := r.sendUndelivered(ctx, userID, chatID)
+	if err != nil {
+		return sent, err
+	}
+	capHit := r.MaxPerRun > 0 && candidates >= r.MaxPerRun
+	r.Logger.Info("digest: user done",
+		"user", userID,
+		"searches", len(searches),
+		"fetched", fetched,
+		"candidates", candidates,
+		"sent", sent,
+		"cap_hit", capHit,
+		"ms", time.Since(start).Milliseconds())
+	return sent, nil
 }
 
 // indexSearch fetches one search, stores what it found, and baselines it if this
@@ -123,17 +138,19 @@ func (r *Runner) indexSearch(ctx context.Context, userID int64, s repo.SearchURL
 	if err != nil {
 		return err
 	}
-	r.logf("digest: search %q: mode=%s cards=%d skipped_type=%d skipped_noid=%d parsed=%d",
-		s.Label, res.Mode, stats.Cards, stats.SkippedType, stats.SkippedNoID, len(listings))
+	r.Logger.Debug("digest: search parsed",
+		"label", s.Label, "url", s.URL, "mode", res.Mode,
+		"cards", stats.Cards, "skipped_type", stats.SkippedType,
+		"skipped_noid", stats.SkippedNoID, "parsed", len(listings))
 
 	if err := r.Repo.UpdateSearchURLStats(ctx, s.ID, res.Status, stats.Cards); err != nil {
-		r.logf("digest: could not record stats for %q: %v", s.Label, err)
+		r.Logger.Warn("digest: could not record stats", "label", s.Label, "err", err)
 	}
 	// A search that keeps returning a full page is saturating: anything below the
 	// newest page is being missed, and that is a portal limit, not a bug.
 	if stats.Cards >= fullPageSize {
-		r.logf("digest: search %q returned a full page (%d cards); listings beyond it are not covered",
-			s.Label, stats.Cards)
+		r.Logger.Warn("digest: search returned a full page; listings beyond it are not covered",
+			"label", s.Label, "cards", stats.Cards)
 	}
 
 	for i, l := range listings {
@@ -164,28 +181,29 @@ func (r *Runner) indexSearch(ctx context.Context, userID int64, s repo.SearchURL
 		if err != nil {
 			return err
 		}
-		r.logf("digest: search %q baselined %d listings (not sent)", s.Label, n)
+		r.Logger.Info("digest: search baselined", "label", s.Label, "not_sent", n)
 	}
 
 	return nil
 }
 
 // sendUndelivered delivers the user's pending listings, newest first, isolating
-// per-listing failures.
-func (r *Runner) sendUndelivered(ctx context.Context, userID, chatID int64) (int, error) {
+// per-listing failures. It returns how many were sent and how many candidates the
+// query considered, so the caller can report the funnel.
+func (r *Runner) sendUndelivered(ctx context.Context, userID, chatID int64) (sent, candidates int, err error) {
 	limit := r.MaxPerRun
 	if limit <= 0 {
 		limit = 1000
 	}
 
-	candidates, err := r.Repo.Candidates(ctx, userID, limit)
+	pending, err := r.Repo.Candidates(ctx, userID, limit)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	weights, err := score.Load(ctx, r.Repo, userID)
 	if err != nil {
-		return 0, err
+		return 0, len(pending), err
 	}
 
 	// Rank, then sort. The sort is stable on top of the query recency order, so
@@ -195,8 +213,8 @@ func (r *Runner) sendUndelivered(ctx context.Context, userID, chatID int64) (int
 		score     float64
 		reasons   []string
 	}
-	ranked := make([]rankedListing, 0, len(candidates))
-	for _, c := range candidates {
+	ranked := make([]rankedListing, 0, len(pending))
+	for _, c := range pending {
 		features := score.Extract(c.Listing)
 		value, _ := weights.Score(features)
 		var reasons []string
@@ -207,10 +225,9 @@ func (r *Runner) sendUndelivered(ctx context.Context, userID, chatID int64) (int
 	}
 	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score > ranked[j].score })
 
-	sent := 0
 	for i, rk := range ranked {
 		if err := ctx.Err(); err != nil {
-			return sent, err
+			return sent, len(pending), err
 		}
 
 		delivery := model.Delivery{
@@ -220,7 +237,7 @@ func (r *Runner) sendUndelivered(ctx context.Context, userID, chatID int64) (int
 			Reasons:   rk.reasons,
 		}
 		if err := r.Notifier.Notify(ctx, formatChatID(chatID), delivery); err != nil {
-			r.logf("digest: notify listing %d failed: %v", rk.candidate.ListingID, err)
+			r.Logger.Warn("digest: notify failed", "listing", rk.candidate.ListingID, "err", err)
 			continue
 		}
 
@@ -230,11 +247,11 @@ func (r *Runner) sendUndelivered(ctx context.Context, userID, chatID int64) (int
 		recorded := rk.score
 		if err := r.Repo.MarkDelivered(ctx, userID, rk.candidate.ListingID, 0, i+1, &recorded,
 			repo.DeliverySent, rk.candidate.Listing.Snapshot()); err != nil {
-			return sent, fmt.Errorf("record delivery of listing %d: %w", rk.candidate.ListingID, err)
+			return sent, len(pending), fmt.Errorf("record delivery of listing %d: %w", rk.candidate.ListingID, err)
 		}
 		sent++
 	}
-	return sent, nil
+	return sent, len(pending), nil
 }
 
 // maxReasonsOnCard is how many plain-language reasons a card shows. Two is enough
@@ -252,12 +269,6 @@ func rankHeader(position, total int) string {
 		return "Hoy"
 	}
 	return fmt.Sprintf("#%d de %d hoy", position, total)
-}
-
-func (r *Runner) logf(format string, args ...any) {
-	if r.Logger != nil {
-		r.Logger.Printf(format, args...)
-	}
 }
 
 func formatChatID(chatID int64) string {
@@ -278,7 +289,7 @@ func (r *Runner) RunDaily(ctx context.Context, date time.Time) (int, error) {
 	}
 	for _, u := range users {
 		if err := r.Repo.EnsureDigest(ctx, u.UserID, date); err != nil {
-			r.logf("digest: could not record run for user %d: %v", u.UserID, err)
+			r.Logger.Warn("digest: could not record run", "user", u.UserID, "err", err)
 		}
 	}
 
@@ -287,7 +298,7 @@ func (r *Runner) RunDaily(ctx context.Context, date time.Time) (int, error) {
 		return 0, err
 	}
 	if len(pending) == 0 {
-		r.logf("digest: nothing pending for %s", date.Format("2006-01-02"))
+		r.Logger.Info("digest: nothing pending", "date", date.Format("2006-01-02"))
 		return 0, nil
 	}
 
@@ -297,16 +308,16 @@ func (r *Runner) RunDaily(ctx context.Context, date time.Time) (int, error) {
 			return total, err
 		}
 		if err := r.Repo.StartDigest(ctx, run.UserID, run.RunDate); err != nil {
-			r.logf("digest: start run for user %d: %v", run.UserID, err)
+			r.Logger.Warn("digest: start run failed", "user", run.UserID, "err", err)
 			continue
 		}
 
 		sent, runErr := r.RunForUser(ctx, run.UserID, run.ChatID)
 		if runErr != nil {
-			r.logf("digest: user %d failed: %v", run.UserID, runErr)
+			r.Logger.Warn("digest: user failed", "user", run.UserID, "err", runErr)
 		}
 		if err := r.Repo.FinishDigest(ctx, run.UserID, run.RunDate, sent, runErr); err != nil {
-			r.logf("digest: finish run for user %d: %v", run.UserID, err)
+			r.Logger.Warn("digest: finish run failed", "user", run.UserID, "err", err)
 		}
 		total += sent
 	}
