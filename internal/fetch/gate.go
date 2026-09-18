@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -19,6 +20,8 @@ type Gate struct {
 	cooldown time.Duration
 	next     time.Time
 	sem      chan struct{}
+	// logger is optional and nil-safe; it records pacing waits at DEBUG.
+	logger *slog.Logger
 }
 
 // NewGate builds a gate. minGap is the minimum spacing between requests,
@@ -55,6 +58,9 @@ func (g *Gate) Acquire(ctx context.Context, priority bool) error {
 	g.mu.Unlock()
 
 	if wait := time.Until(start); wait > 0 {
+		if g.logger != nil {
+			g.logger.Debug("fetch: gate wait", "wait", wait.Round(time.Millisecond), "priority", priority)
+		}
 		if err := sleepWithContext(ctx, wait); err != nil {
 			<-g.sem
 			return err

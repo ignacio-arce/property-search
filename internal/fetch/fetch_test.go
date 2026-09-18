@@ -1,9 +1,12 @@
 package fetch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +14,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"zonapropbot/internal/config"
+	"zonapropbot/internal/logging"
 )
 
 func cfgFrom(t *testing.T, env map[string]string) *config.Config {
@@ -366,5 +371,52 @@ func TestProxyCredentialsDoNotLeakIntoErrors(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Errorf("the proxy password leaked into the error: %v", err)
+	}
+}
+
+// A successful fetch must leave its mode, status, duration and URL at DEBUG: that
+// is the line that says which path answered and how fast.
+func TestLoggerRecordsSuccessfulFetch(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<html>ok</html>"))
+	}))
+	defer target.Close()
+
+	var buf bytes.Buffer
+	c := New(cfgFrom(t, map[string]string{"FETCH_RETRIES": "0"}),
+		WithLogger(logging.New(&buf, slog.LevelDebug)))
+
+	if _, err := c.Fetch(context.Background(), target.URL); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{"fetch: done", "mode=tls", "status=200", "ms=", "url="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("fetched log %q does not contain %q", out, want)
+		}
+	}
+}
+
+// A challenge is the signal that Cloudflare is escalating, so it must be visible
+// at WARN, and a paced request must also cool the gate down.
+func TestBlockedChallengeLogsWarnAndCoolDown(t *testing.T) {
+	var buf bytes.Buffer
+	c := New(cfgFrom(t, map[string]string{"FETCH_RATE_LIMIT": "1m"}),
+		WithLogger(logging.New(&buf, slog.LevelDebug)))
+
+	blocked := &Error{Kind: KindBlocked, Status: 403, Mode: "flaresolverr", Err: errors.New("challenge")}
+	if !c.holdOffOnBlocked(blocked, true, "https://www.zonaprop.com.ar/x.html") {
+		t.Fatal("a challenge must be reported as blocking")
+	}
+
+	out := buf.String()
+	for _, want := range []string{"level=WARN", "fetch: blocked", "mode=flaresolverr", "status=403", "cooldown="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("blocked log %q does not contain %q", out, want)
+		}
+	}
+	if c.gate.NextAllowed().Before(time.Now().Add(time.Minute - time.Second)) {
+		t.Error("the gate was not pushed back by the cooldown")
 	}
 }
