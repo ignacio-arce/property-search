@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"zonapropbot/internal/fetch"
@@ -99,25 +100,37 @@ func (r *Runner) RunForUser(ctx context.Context, userID, chatID int64) (int, err
 		return 0, nil
 	}
 
-	fetched := 0
+	// The searches are indexed in parallel: the fetch gate paces them anyway, and
+	// issuing them together lets the gate schedule the queue instead of waiting for
+	// each round-trip before asking for the next. A failing URL must not abort the
+	// cycle, so each one logs and is counted independently.
+	var (
+		wg      sync.WaitGroup
+		fetched atomic.Int64
+	)
 	for _, s := range searches {
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
-		if err := r.indexSearch(ctx, userID, s); err != nil {
-			// A failing URL must not abort the cycle: the remaining searches still
-			// get processed and the failure is logged.
-			r.Logger.Warn("digest: search failed", "user", userID, "label", s.Label, "err", err)
-			r.Logger.Debug("digest: search failed url", "user", userID, "url", s.URL, "err", err)
-			continue
-		}
-		fetched++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := r.indexSearch(ctx, userID, s); err != nil {
+				r.Logger.Warn("digest: search failed", "user", userID, "label", s.Label, "err", err)
+				r.Logger.Debug("digest: search failed url", "user", userID, "url", s.URL, "err", err)
+				return
+			}
+			fetched.Add(1)
+		}()
 	}
+	wg.Wait()
+
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	fetchedN := int(fetched.Load())
 
 	// If not a single search could be read, the day was not a success: mark it so
 	// the run is retried instead of silently counted as done. A partial failure is
 	// different — the remaining listings are still undelivered and go out tomorrow.
-	if fetched == 0 {
+	if fetchedN == 0 {
 		return 0, fmt.Errorf("no search could be fetched for user %d (%d configured)", userID, len(searches))
 	}
 
@@ -129,7 +142,7 @@ func (r *Runner) RunForUser(ctx context.Context, userID, chatID int64) (int, err
 	r.Logger.Info("digest: user done",
 		"user", userID,
 		"searches", len(searches),
-		"fetched", fetched,
+		"fetched", fetchedN,
 		"candidates", candidates,
 		"sent", sent,
 		"cap_hit", capHit,

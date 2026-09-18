@@ -28,14 +28,14 @@ const (
 type fakeFetcher struct {
 	pages map[string][]byte
 	err   map[string]error
-	calls int
+	calls atomic.Int32
 	// onFetch, when set, runs at the start of every Fetch. Tests use it to observe
 	// or serialize concurrent runs.
 	onFetch func()
 }
 
 func (f *fakeFetcher) Fetch(_ context.Context, u string) (*fetch.Result, error) {
-	f.calls++
+	f.calls.Add(1)
 	if f.onFetch != nil {
 		f.onFetch()
 	}
@@ -290,6 +290,51 @@ func TestConcurrentRunsForTheSameUserAreSerialized(t *testing.T) {
 	<-secondDone
 }
 
+// A run indexes its searches in parallel: the second fetch must be in flight
+// before the first returns, otherwise they are being done one after another.
+func TestSearchesAreIndexedInParallel(t *testing.T) {
+	r := fixture(t, 1, 1, searchA, searchB)
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa"), searchB: page("bbb")}}
+
+	var arrived atomic.Int32
+	both := make(chan struct{})
+	f.onFetch = func() {
+		if arrived.Add(1) == 2 {
+			close(both)
+		}
+		select {
+		case <-both:
+		case <-time.After(3 * time.Second):
+		}
+	}
+
+	runner := newRunner(r, f, &recordingNotifier{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := runner.RunForUser(context.Background(), 1, 1)
+		done <- err
+	}()
+
+	select {
+	case <-both:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the searches were not indexed in parallel")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	for _, s := range []string{searchA, searchB} {
+		count, err := r.CountListingSources(context.Background(), searchURLIDOf(t, r, 1, s))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 {
+			t.Errorf("search %s was not indexed", s)
+		}
+	}
+}
+
 // A failed search must not abort the cycle: the other searches still get indexed.
 func TestFailingSearchDoesNotAbortTheCycle(t *testing.T) {
 	r := fixture(t, 1, 1, searchA, searchB)
@@ -414,8 +459,8 @@ func TestInactiveUsersAreSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sent != 0 || f.calls != 0 {
-		t.Errorf("inactive user must be skipped entirely: sent=%d fetches=%d", sent, f.calls)
+	if sent != 0 || f.calls.Load() != 0 {
+		t.Errorf("inactive user must be skipped entirely: sent=%d fetches=%d", sent, f.calls.Load())
 	}
 }
 
@@ -547,8 +592,8 @@ func TestActiveGateSkipsInactiveUsersInRunDaily(t *testing.T) {
 	if _, err := runner.RunDaily(ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if f.calls != 0 {
-		t.Errorf("inactive user was fetched %d times", f.calls)
+	if f.calls.Load() != 0 {
+		t.Errorf("inactive user was fetched %d times", f.calls.Load())
 	}
 }
 
