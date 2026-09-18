@@ -170,7 +170,7 @@ func (a *app) retrainAll(ctx context.Context) error {
 
 func (a *app) startValidator(ctx context.Context) {
 	validator := &validate.Validator{
-		Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.legacy,
+		Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.logger,
 	}
 	go func() {
 		ticker := time.NewTicker(validatorInterval)

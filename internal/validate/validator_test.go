@@ -1,10 +1,10 @@
 package validate
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"io"
-	"log"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +14,7 @@ import (
 	"zonapropbot/internal/db"
 	"zonapropbot/internal/dbtest"
 	"zonapropbot/internal/fetch"
+	"zonapropbot/internal/logging"
 	"zonapropbot/internal/repo"
 )
 
@@ -74,7 +75,57 @@ func statusOf(t *testing.T, pool *pgxpool.Pool, id int64) (string, int, *time.Ti
 
 func newValidator(r *repo.Repo, f Fetcher) (*Validator, *fakeNotifier) {
 	n := &fakeNotifier{}
-	return &Validator{Repo: r, Fetcher: f, Notifier: n, Logger: log.New(io.Discard, "", 0)}, n
+	return &Validator{Repo: r, Fetcher: f, Notifier: n, Logger: logging.Discard()}, n
+}
+
+// A pass with pending searches must leave one line with the outcome counts, which
+// is what tells the operator whether the validator is making progress.
+func TestRunOnceLogsTheRunSummary(t *testing.T) {
+	r, _, _ := fixture(t)
+	body := []byte(`<html><body><div data-to-posting="/p/a.html" data-id="1" data-posting-type="PROPERTY"></div></body></html>`)
+	var buf bytes.Buffer
+	v := &Validator{
+		Repo: r, Fetcher: &fakeFetcher{res: &fetch.Result{Body: body, Status: 200}},
+		Notifier: &fakeNotifier{}, Logger: logging.New(&buf, slog.LevelInfo),
+	}
+
+	if _, err := v.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "validate: run done") {
+		t.Fatalf("summary line missing: %q", out)
+	}
+	for _, want := range []string{"checked=1", "valid=1", "empty=0", "invalid=0", "retrying=0", "ms="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary %q does not contain %q", out, want)
+		}
+	}
+}
+
+// With nothing due there is nothing to report: the ticker runs every ten minutes
+// and a line per empty pass would be pure noise.
+func TestRunOnceWithoutPendingIsSilent(t *testing.T) {
+	r, _, _ := fixture(t)
+	body := []byte(`<html><body><div data-to-posting="/p/a.html" data-id="1" data-posting-type="PROPERTY"></div></body></html>`)
+	var buf bytes.Buffer
+	v := &Validator{
+		Repo: r, Fetcher: &fakeFetcher{res: &fetch.Result{Body: body, Status: 200}},
+		Notifier: &fakeNotifier{}, Logger: logging.New(&buf, slog.LevelInfo),
+	}
+	ctx := context.Background()
+
+	if _, err := v.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	if _, err := v.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "validate: run done") {
+		t.Errorf("an empty pass must stay silent, got: %q", buf.String())
+	}
 }
 
 func TestValidPageBecomesWatched(t *testing.T) {

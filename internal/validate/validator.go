@@ -12,7 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"time"
 
@@ -36,7 +36,7 @@ type Validator struct {
 	Repo     *repo.Repo
 	Fetcher  Fetcher
 	Notifier Notifier
-	Logger   *log.Logger
+	Logger   *slog.Logger
 	// MaxAttempts is how many deep checks a URL gets before it is declared invalid.
 	MaxAttempts int
 	// BatchSize bounds how many URLs one pass checks.
@@ -74,6 +74,7 @@ func (v *Validator) RunOnce(ctx context.Context) (int, error) {
 		v.BatchSize = defaultBatchSize
 	}
 
+	start := time.Now()
 	pending, err := v.Repo.PendingValidations(ctx, v.BatchSize)
 	if err != nil {
 		return 0, err
@@ -85,14 +86,17 @@ func (v *Validator) RunOnce(ctx context.Context) (int, error) {
 	becameValid := 0
 	sawCards := false
 	sawEmpty := false
+	checked, valid, empty, invalid, retrying, failed := 0, 0, 0, 0, 0, 0
 
 	for _, s := range pending {
 		if err := ctx.Err(); err != nil {
 			return becameValid, err
 		}
+		checked++
 		outcome, cards, err := v.check(ctx, s)
 		if err != nil {
-			v.logf("validate: %q: %v", s.Label, err)
+			v.Logger.Warn("validate: check failed", "label", s.Label, "url", s.URL, "err", err)
+			failed++
 			continue
 		}
 		if cards > 0 {
@@ -109,40 +113,50 @@ func (v *Validator) RunOnce(ctx context.Context) (int, error) {
 				return becameValid, err
 			}
 			becameValid++
+			valid++
 			v.notify(ctx, s.ID, fmt.Sprintf("✅ `%s` ya está validada: empiezo a vigilarla.", s.Label))
-			v.logf("validate: %q valid (%d cards)", s.Label, cards)
+			v.Logger.Debug("validate: search valid", "label", s.Label, "url", s.URL, "cards", cards)
 
 		case outcome == OutcomeValidEmpty:
 			if err := v.Repo.SetSearchURLValidation(ctx, s.ID, string(OutcomeValidEmpty), 0); err != nil {
 				return becameValid, err
 			}
 			becameValid++
+			empty++
 			v.notify(ctx, s.ID, fmt.Sprintf("✅ `%s` está validada, aunque ahora mismo no tenga resultados.", s.Label))
-			v.logf("validate: %q valid but empty", s.Label)
+			v.Logger.Debug("validate: search valid but empty", "label", s.Label, "url", s.URL)
 
 		case attempts >= v.MaxAttempts:
 			if err := v.Repo.SetSearchURLValidation(ctx, s.ID, string(OutcomeInvalid), 0); err != nil {
 				return becameValid, err
 			}
+			invalid++
 			v.notify(ctx, s.ID, fmt.Sprintf(
 				"⚠️ No pude validar `%s` después de %d intentos. Fijate que la URL siga andando en el navegador, o borrala con /rmurl.",
 				s.Label, attempts))
-			v.logf("validate: %q invalid after %d attempts", s.Label, attempts)
+			v.Logger.Warn("validate: search invalid after attempts", "label", s.Label, "attempts", attempts)
 
 		default:
 			next := backoffSeconds(attempts)
 			if err := v.Repo.SetSearchURLValidation(ctx, s.ID, string(outcome), next); err != nil {
 				return becameValid, err
 			}
-			v.logf("validate: %q %s (attempt %d, next check in %ds)", s.Label, outcome, attempts, next)
+			retrying++
+			v.Logger.Debug("validate: search retrying", "label", s.Label, "status", string(outcome),
+				"attempt", attempts, "next_check_s", next)
 		}
 	}
 
 	// Canary: an empty page is normal for a narrow search, but if every search in
 	// this pass came back empty, the DOM probably changed rather than the market.
 	if sawEmpty && !sawCards {
-		v.logf("validate: WARNING every checked search returned zero cards; looks like a DOM change, not empty searches")
+		v.Logger.Warn("validate: every checked search returned zero cards; looks like a DOM change, not empty searches")
 	}
+
+	v.Logger.Info("validate: run done",
+		"checked", checked, "valid", valid, "empty", empty,
+		"invalid", invalid, "retrying", retrying, "failed", failed,
+		"ms", time.Since(start).Milliseconds())
 	return becameValid, nil
 }
 
@@ -175,11 +189,11 @@ func (v *Validator) check(ctx context.Context, s repo.SearchURL) (Outcome, int, 
 func (v *Validator) notify(ctx context.Context, searchURLID int64, text string) {
 	_, chatID, err := v.Repo.SearchURLOwner(ctx, searchURLID)
 	if err != nil {
-		v.logf("validate: owner of search %d: %v", searchURLID, err)
+		v.Logger.Warn("validate: search owner lookup failed", "search", searchURLID, "err", err)
 		return
 	}
 	if err := v.Notifier.SendText(ctx, fmt.Sprintf("%d", chatID), text); err != nil && !errors.Is(err, context.Canceled) {
-		v.logf("validate: notify: %v", err)
+		v.Logger.Warn("validate: notify failed", "search", searchURLID, "err", err)
 	}
 }
 
@@ -191,10 +205,4 @@ func backoffSeconds(attempt int) int {
 		seconds = maxBackoff.Seconds()
 	}
 	return int(seconds)
-}
-
-func (v *Validator) logf(format string, args ...any) {
-	if v.Logger != nil {
-		v.Logger.Printf(format, args...)
-	}
 }
