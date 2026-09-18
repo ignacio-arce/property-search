@@ -8,7 +8,7 @@ package scheduler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 )
 
@@ -29,7 +29,7 @@ type Job func(ctx context.Context)
 // Run fires job every day at the configured local time until ctx is cancelled.
 // It never runs job at boot: restart: unless-stopped would otherwise trigger an
 // off-schedule digest on every restart.
-func Run(ctx context.Context, loc *time.Location, hour, minute int, job Job, logger *log.Logger, now func() time.Time) error {
+func Run(ctx context.Context, loc *time.Location, hour, minute int, job Job, logger *slog.Logger, now func() time.Time) error {
 	if now == nil {
 		now = time.Now
 	}
@@ -40,7 +40,7 @@ func Run(ctx context.Context, loc *time.Location, hour, minute int, job Job, log
 			wait = 0
 		}
 		if logger != nil {
-			logger.Printf("scheduler: next digest at %s (in %s)", next.Format(time.RFC3339), wait.Round(time.Second))
+			logger.Info("scheduler: next digest", "at", next.Format(time.RFC3339), "in", wait.Round(time.Second))
 		}
 
 		timer := time.NewTimer(wait)

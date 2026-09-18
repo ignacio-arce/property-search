@@ -5,7 +5,7 @@ package db
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,7 +23,7 @@ type Options struct {
 	// It exists to cover the compose healthcheck race: the bot container may be
 	// released while Postgres is still finishing initialisation.
 	ConnectTimeout time.Duration
-	Logger         *log.Logger
+	Logger         *slog.Logger
 }
 
 // Open connects to Postgres and verifies the connection with a ping, retrying
@@ -54,7 +54,7 @@ func Open(ctx context.Context, dsn string, opts Options) (*pgxpool.Pool, error) 
 			return nil, fmt.Errorf("postgres unreachable after %s: %w", opts.ConnectTimeout, lastErr)
 		}
 		if opts.Logger != nil {
-			opts.Logger.Printf("postgres not ready (attempt %d): %v", attempt, err)
+			opts.Logger.Info("postgres not ready", "attempt", attempt, "err", err)
 		}
 		select {
 		case <-ctx.Done():

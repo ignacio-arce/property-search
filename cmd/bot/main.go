@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	// The image is FROM scratch with no zoneinfo, so without this import
 	// time.LoadLocation falls back to UTC and 09:00 local fires at 06:00.
 	_ "time/tzdata"
@@ -22,6 +23,7 @@ import (
 	"zonapropbot/internal/db"
 	"zonapropbot/internal/digest"
 	"zonapropbot/internal/fetch"
+	"zonapropbot/internal/logging"
 	"zonapropbot/internal/repo"
 	"zonapropbot/internal/scheduler"
 	"zonapropbot/internal/score"
@@ -43,52 +45,62 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	logger := log.New(os.Stdout, "", log.LstdFlags)
+	logger := logging.New(os.Stdout, cfg.LogLevel)
+	slog.SetDefault(logger)
+	// Temporary bridge while the remaining packages still accept a *log.Logger.
+	// It is removed once they are migrated to slog.
+	legacy := log.New(os.Stdout, "", log.LstdFlags)
 
 	pool, err := db.Open(ctx, cfg.DatabaseURL(), db.Options{Logger: logger})
 	if err != nil {
-		log.Fatalf("db: %v", err)
+		fatal(logger, "db", err)
 	}
 	defer pool.Close()
 
 	if err := db.Migrate(ctx, pool); err != nil {
-		log.Fatalf("migrate: %v", err)
+		fatal(logger, "migrate", err)
 	}
 	if err := db.Seed(ctx, pool, seedInput(cfg)); err != nil {
-		log.Fatalf("seed: %v", err)
+		fatal(logger, "seed", err)
 	}
 
-	app := newApp(cfg, pool, logger)
+	app := newApp(cfg, pool, logger, legacy)
 	app.logStartup()
 	if err := app.retrainAll(ctx); err != nil {
-		log.Fatalf("retrain: %v", err)
+		fatal(logger, "retrain", err)
 	}
 	app.startValidator(ctx)
 	app.startPoller(ctx)
 
 	loc, err := time.LoadLocation(cfg.ScheduleTZ)
 	if err != nil {
-		log.Fatalf("schedule tz: %v", err)
+		fatal(logger, "schedule tz", err)
 	}
 	hour, minute := cfg.DailyHourParts()
 
 	if cfg.RunOnStart {
-		logger.Printf("digest: RUN_ON_START is on, running one cycle at boot")
+		logger.Info("digest: RUN_ON_START is on, running one cycle at boot")
 		app.runDigest(ctx, loc)
 	}
 
-	logger.Printf("digest: daily at %s %s (next %s)", cfg.DailyHour, cfg.ScheduleTZ,
-		scheduler.NextRun(time.Now(), loc, hour, minute).Format(time.RFC3339))
+	logger.Info("digest: daily schedule", "at", cfg.DailyHour, "tz", cfg.ScheduleTZ)
 	if err := scheduler.Run(ctx, loc, hour, minute,
 		func(runCtx context.Context) { app.runDigest(runCtx, loc) }, logger, time.Now); err != nil {
-		logger.Printf("digest: scheduler stopped: %v", err)
+		logger.Warn("digest: scheduler stopped", "err", err)
 	}
 
 	// Cancel and wait for the poller before returning: its deferred release of the
 	// poll lease needs a live pool, and the deferred pool.Close runs after this.
 	stop()
 	app.pollerWG.Wait()
-	logger.Println("signal received, shutting down")
+	logger.Info("signal received, shutting down")
+}
+
+// fatal logs a startup error at ERROR and exits. After the logger exists it
+// replaces log.Fatalf, so the whole run shares one format.
+func fatal(logger *slog.Logger, msg string, err error) {
+	logger.Error(msg, "err", err)
+	os.Exit(1)
 }
 
 // app groups the wiring the background jobs share, so each job reads as a named
@@ -99,13 +111,16 @@ type app struct {
 	fetcher *fetch.Client
 	notify  *telegram.Notifier
 	digest  *digest.Runner
-	logger  *log.Logger
+	logger  *slog.Logger
+	// legacy is the pre-migration *log.Logger still expected by packages that have
+	// not moved to slog yet. It disappears when they do.
+	legacy *log.Logger
 
 	// pollerWG tracks the Telegram poller so shutdown can wait for it.
 	pollerWG sync.WaitGroup
 }
 
-func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *log.Logger) *app {
+func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger, legacy *log.Logger) *app {
 	fetcher := fetch.New(cfg)
 	notifier := telegram.New(cfg, imageDownloader{fc: fetcher}, os.Stdout)
 	repository := repo.New(pool)
@@ -118,17 +133,20 @@ func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *log.Logger) *app {
 			Repo:      repository,
 			Fetcher:   fetcher,
 			Notifier:  notifier,
-			Logger:    logger,
+			Logger:    legacy,
 			MaxPerRun: cfg.MaxDaily,
 		},
 		logger: logger,
+		legacy: legacy,
 	}
 }
 
 func (a *app) logStartup() {
-	a.logger.Printf("bot: flaresolverr=%s proxy=%s rate=%s (dry-run=%v)",
-		onOff(a.cfg.FlareSolverrURL), onOff(a.cfg.ZonapropProxy),
-		a.cfg.FetchRateLimit, a.cfg.TelegramBotToken == "")
+	a.logger.Info("bot: startup",
+		"flaresolverr", onOff(a.cfg.FlareSolverrURL),
+		"proxy", onOff(a.cfg.ZonapropProxy),
+		"rate", a.cfg.FetchRateLimit,
+		"dry_run", a.cfg.TelegramBotToken == "")
 }
 
 // retrainAll rebuilds every active user's model at boot, until the nightly job
@@ -142,17 +160,17 @@ func (a *app) retrainAll(ctx context.Context) error {
 	for _, u := range users {
 		version, err := score.Retrain(ctx, a.repo, u.UserID)
 		if err != nil {
-			a.logger.Printf("retrain user %d: %v", u.UserID, err)
+			a.logger.Warn("retrain failed", "user", u.UserID, "err", err)
 			continue
 		}
-		a.logger.Printf("retrain user %d: model v%d", u.UserID, version)
+		a.logger.Info("retrain done", "user", u.UserID, "model_version", version)
 	}
 	return nil
 }
 
 func (a *app) startValidator(ctx context.Context) {
 	validator := &validate.Validator{
-		Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.logger,
+		Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.legacy,
 	}
 	go func() {
 		ticker := time.NewTicker(validatorInterval)
@@ -163,7 +181,7 @@ func (a *app) startValidator(ctx context.Context) {
 				return
 			case <-ticker.C:
 				if _, err := validator.RunOnce(ctx); err != nil && ctx.Err() == nil {
-					a.logger.Printf("validate: %v", err)
+					a.logger.Warn("validate: run failed", "err", err)
 				}
 			}
 		}
@@ -174,15 +192,15 @@ func (a *app) startValidator(ctx context.Context) {
 // not its state: one consumes updates, the other produces deliveries.
 func (a *app) startPoller(ctx context.Context) {
 	if a.cfg.TelegramBotToken == "" {
-		a.logger.Printf("chat: no TELEGRAM_BOT_TOKEN, skipping inbound polling")
+		a.logger.Info("chat: no TELEGRAM_BOT_TOKEN, skipping inbound polling")
 		return
 	}
 	poller := &chat.Poller{
 		Repo:   a.repo,
 		API:    a.notify,
-		Logger: a.logger,
+		Logger: a.legacy,
 		Contacts: &contact.Extractor{
-			Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.logger,
+			Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.legacy,
 		},
 		Holder: pollerHolder(),
 	}
@@ -190,7 +208,7 @@ func (a *app) startPoller(ctx context.Context) {
 	go func() {
 		defer a.pollerWG.Done()
 		if err := poller.Run(ctx); err != nil {
-			a.logger.Printf("chat: poller stopped: %v", err)
+			a.logger.Warn("chat: poller stopped", "err", err)
 		}
 	}()
 }
@@ -199,10 +217,10 @@ func (a *app) runDigest(ctx context.Context, loc *time.Location) {
 	start := time.Now()
 	sent, err := a.digest.RunDaily(ctx, time.Now().In(loc))
 	if err != nil {
-		a.logger.Printf("digest: cycle aborted: %v", err)
+		a.logger.Error("digest: cycle aborted", "err", err)
 		return
 	}
-	a.logger.Printf("digest: cycle done in %s: %d sent", time.Since(start).Round(time.Millisecond), sent)
+	a.logger.Info("digest: cycle done", "sent", sent, "ms", time.Since(start).Milliseconds())
 }
 
 func seedInput(cfg *config.Config) db.SeedInput {
