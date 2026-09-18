@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 
 	"zonapropbot/internal/fetch"
@@ -41,6 +42,20 @@ type Runner struct {
 	// MaxPerRun caps how many listings are sent in one cycle. 0 means no cap;
 	// the daily cap with carry-over arrives in V4.3.
 	MaxPerRun int
+
+	// locks serializes RunForUser per user. Candidates reads what has no delivery
+	// row and MarkDelivered is written after sending, so two overlapping runs of
+	// the same user would send the same card twice. The daily scheduler and the
+	// manual /buscar both go through here.
+	locks sync.Map // userID -> *sync.Mutex
+}
+
+// lockUser serializes one user's run and returns the release function.
+func (r *Runner) lockUser(userID int64) func() {
+	value, _ := r.locks.LoadOrStore(userID, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
 }
 
 // RunAll processes every user the operator has activated and returns how many
@@ -73,6 +88,7 @@ func (r *Runner) RunAll(ctx context.Context) (int, error) {
 // RunForUser fetches the user's searches, indexes new listings and sends the ones
 // the user has not been shown. It returns how many were sent.
 func (r *Runner) RunForUser(ctx context.Context, userID, chatID int64) (int, error) {
+	defer r.lockUser(userID)()
 	start := time.Now()
 	searches, err := r.Repo.ListValidSearchURLs(ctx, userID)
 	if err != nil {

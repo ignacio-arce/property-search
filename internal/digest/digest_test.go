@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,10 +29,16 @@ type fakeFetcher struct {
 	pages map[string][]byte
 	err   map[string]error
 	calls int
+	// onFetch, when set, runs at the start of every Fetch. Tests use it to observe
+	// or serialize concurrent runs.
+	onFetch func()
 }
 
 func (f *fakeFetcher) Fetch(_ context.Context, u string) (*fetch.Result, error) {
 	f.calls++
+	if f.onFetch != nil {
+		f.onFetch()
+	}
 	if err := f.err[u]; err != nil {
 		return nil, err
 	}
@@ -237,6 +245,49 @@ func TestRunForUserReportsCapHit(t *testing.T) {
 	if !strings.Contains(out, "candidates=1") || !strings.Contains(out, "sent=1") {
 		t.Errorf("summary counts wrong with a cap of 1: %q", out)
 	}
+}
+
+// Runs for the same user must not overlap: Candidates reads what has no delivery
+// row and MarkDelivered is written after sending, so two overlapping runs would
+// send the same card twice.
+func TestConcurrentRunsForTheSameUserAreSerialized(t *testing.T) {
+	r := fixture(t, 1, 1, searchA)
+	f := &fakeFetcher{pages: map[string][]byte{searchA: page("aaa")}}
+
+	var (
+		inFetch atomic.Int32
+		entered = make(chan struct{})
+		release = make(chan struct{})
+		once    sync.Once
+	)
+	f.onFetch = func() {
+		if inFetch.Add(1) > 1 {
+			t.Error("two runs fetched concurrently for the same user")
+		}
+		once.Do(func() { close(entered) })
+		<-release
+		inFetch.Add(-1)
+	}
+
+	runner := newRunner(r, f, &recordingNotifier{})
+	ctx := context.Background()
+
+	firstDone := make(chan struct{})
+	go func() { defer close(firstDone); _, _ = runner.RunForUser(ctx, 1, 1) }()
+	<-entered
+
+	secondDone := make(chan struct{})
+	go func() { defer close(secondDone); _, _ = runner.RunForUser(ctx, 1, 1) }()
+
+	select {
+	case <-secondDone:
+		t.Fatal("the second run finished while the first was still fetching: runs are not serialized")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	<-firstDone
+	<-secondDone
 }
 
 // A failed search must not abort the cycle: the other searches still get indexed.
