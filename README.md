@@ -23,6 +23,9 @@ contra Zonaprop es el recurso escaso.
 5. Un **👍** te manda además el **teléfono del aviso**, extraído del detalle. Si no está, no pasa
    nada: el link ya estaba en la tarjeta.
 6. Con `/model` ves qué aprendió, cuántas calificaciones tiene y qué tan bien viene ordenando.
+7. **`/buscar`** dispara la búsqueda **en el momento** sin esperar las 09:00, con un tope de una vez
+   por hora por usuario. No cambia el switch del operador ni la corrida diaria: es una corrida extra
+   a pedido. La diaria de las 09:00 sigue funcionando igual.
 
 ## Estado del despliegue
 
