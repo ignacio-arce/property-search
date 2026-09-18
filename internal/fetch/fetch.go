@@ -214,7 +214,8 @@ func (c *Client) FetchWith(ctx context.Context, u string, opts Options) (*Result
 		}
 	}
 
-	c.warn("fetch: failed after retries", "attempts", maxAttempts, "url", u, "err", lastErr)
+	c.warn("fetch: failed after retries", "attempts", maxAttempts, "err", lastErr)
+	c.debug("fetch: failed url", "url", u)
 	return nil, fmt.Errorf("fetch %s: failed after %d attempt(s): %w", u, maxAttempts, lastErr)
 }
 
@@ -236,10 +237,12 @@ func (c *Client) holdOffOnBlocked(err error, gated bool, u string) bool {
 	if gated {
 		c.gate.Cooldown()
 		c.warn("fetch: blocked; gate cooling down", "mode", errorMode(err), "status", errorStatus(err),
-			"cooldown", c.gate.cooldown, "url", u)
+			"cooldown", c.gate.cooldown)
+		c.debug("fetch: blocked url", "url", u)
 		return true
 	}
-	c.warn("fetch: blocked", "mode", errorMode(err), "status", errorStatus(err), "url", u)
+	c.warn("fetch: blocked", "mode", errorMode(err), "status", errorStatus(err))
+	c.debug("fetch: blocked url", "url", u)
 	return true
 }
 
