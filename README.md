@@ -127,6 +127,38 @@ ALTER ROLE zonaprop WITH PASSWORD 'nueva';
 
 y actualizá `.env` en el mismo momento.
 
+## Logs
+
+El bot escribe a stdout en texto legible; se leen con `docker compose logs -f zonaprop-bot`. El nivel
+se controla con `LOG_LEVEL` (`debug | info | warn | error`, default `info`).
+
+- **INFO** — hitos y una línea de resumen por operación.
+- **WARN** — algo se degradó pero el bot siguió: challenge de Cloudflare, un fetch que falla, un
+  update descartado, una URL que no se pudo validar.
+- **ERROR** — solo un fallo que aborta el arranque o un ciclo completo.
+- **DEBUG** — detalle por ítem: modo, pacing y URL de cada fetch, stats de parseo, resultado por URL.
+
+Ejemplo del resumen diario por usuario:
+
+```
+time=... level=INFO msg="digest: user done" user=42 searches=3 fetched=3 candidates=18 sent=15 cap_hit=true ms=8420
+```
+
+Lectura: 3 búsquedas, 3 respondieron, 18 candidatas, 15 enviadas, y el tope diario cortó el resto
+(`cap_hit=true`). Si `fetched` es menor que `searches`, un WARN de arriba dice cuál falló y por qué.
+
+Ejemplo de bloqueo:
+
+```
+time=... level=WARN msg="fetch: blocked; gate cooling down" mode=flaresolverr status=403 cooldown=5m0s
+```
+
+**Privacidad.** Los identificadores (`user`, `chat`, `label`, `listing`) salen en INFO; la URL
+completa de una búsqueda solo aparece en DEBUG. El token del bot sigue redactado por `httpx.Redact`.
+
+**DEBUG para diagnosticar.** Subilo temporalmente (`LOG_LEVEL=debug` en `.env`) y volvé a `info` al
+terminar: es detalle por ítem y no está pensado para dejarlo prendido.
+
 ## Desarrollo
 
 ```bash
