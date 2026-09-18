@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"net/url"
 	"strings"
 	"testing"
@@ -211,6 +212,48 @@ func TestFetchRateLimitParsing(t *testing.T) {
 
 	if _, err := Load(envFromMap(map[string]string{"FETCH_RATE_LIMIT": "0s"})); err == nil {
 		t.Fatal("expected error for a non-positive FETCH_RATE_LIMIT")
+	}
+}
+
+func TestLogLevelParsing(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.LogLevel != slog.LevelInfo {
+		t.Errorf("LogLevel default = %v, want INFO", cfg.LogLevel)
+	}
+
+	cases := []struct {
+		raw  string
+		want slog.Level
+	}{
+		{"debug", slog.LevelDebug},
+		{"DEBUG", slog.LevelDebug},
+		{"warn", slog.LevelWarn},
+		{"error", slog.LevelError},
+		{"info", slog.LevelInfo},
+	}
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			cfg, err := Load(envFromMap(map[string]string{"LOG_LEVEL": tc.raw}))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.LogLevel != tc.want {
+				t.Errorf("LogLevel = %v, want %v", cfg.LogLevel, tc.want)
+			}
+		})
+	}
+}
+
+func TestLogLevelRejectsUnknownValue(t *testing.T) {
+	_, err := Load(envFromMap(map[string]string{"LOG_LEVEL": "verbose"}))
+	if err == nil {
+		t.Fatal("expected error for an unknown LOG_LEVEL")
+	}
+	if !strings.Contains(err.Error(), "LOG_LEVEL") {
+		t.Errorf("error should name LOG_LEVEL, got: %v", err)
 	}
 }
 

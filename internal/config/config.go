@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -68,6 +69,9 @@ type Config struct {
 	// MaxDaily caps how many listings one user gets per day. The surplus is carried
 	// to the next day rather than dropped.
 	MaxDaily int
+	// LogLevel is the minimum severity the bot emits. Defaults to info, so the
+	// per-operation summaries are visible without the per-item debug noise.
+	LogLevel slog.Level
 }
 
 // Load reads configuration from the environment via getenv. It returns an
@@ -89,6 +93,7 @@ func Load(getenv func(string) string) (*Config, error) {
 		ScheduleTZ:        "America/Argentina/Buenos_Aires",
 		DailyHour:         "09:00",
 		MaxDaily:          15,
+		LogLevel:          slog.LevelInfo,
 	}
 
 	// TELEGRAM_CHAT_ID is optional: it is only a default target for local runs.
@@ -151,6 +156,12 @@ func Load(getenv func(string) string) (*Config, error) {
 
 	if err := intEnv(getenv, "MAX_DAILY", 1, &cfg.MaxDaily); err != nil {
 		return nil, err
+	}
+
+	if v := getenv("LOG_LEVEL"); v != "" {
+		if err := cfg.LogLevel.UnmarshalText([]byte(v)); err != nil {
+			return nil, fmt.Errorf("invalid LOG_LEVEL %q: must be one of debug, info, warn, error", v)
+		}
 	}
 
 	cfg.SeedChatID = getenv("SEED_CHAT_ID")
