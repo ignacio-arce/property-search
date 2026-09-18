@@ -3,8 +3,6 @@ package contact
 import (
 	"context"
 	"errors"
-	"io"
-	"log"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +12,7 @@ import (
 	"zonapropbot/internal/db"
 	"zonapropbot/internal/dbtest"
 	"zonapropbot/internal/fetch"
+	"zonapropbot/internal/logging"
 	"zonapropbot/internal/repo"
 )
 
@@ -60,7 +59,7 @@ func setup(t *testing.T) (*Extractor, *repo.Repo, *pgxpool.Pool, int64, *fakeFet
 	fetcher := &fakeFetcher{}
 	notifier := &fakeNotifier{}
 	e := &Extractor{Repo: r, Fetcher: fetcher, Notifier: notifier,
-		Logger: log.New(io.Discard, "", 0), Now: time.Now}
+		Logger: logging.Discard(), Now: time.Now}
 	return e, r, pool, listingID, fetcher, notifier
 }
 

@@ -47,9 +47,6 @@ func main() {
 
 	logger := logging.New(os.Stdout, cfg.LogLevel)
 	slog.SetDefault(logger)
-	// Temporary bridge while the remaining packages still accept a *log.Logger.
-	// It is removed once they are migrated to slog.
-	legacy := log.New(os.Stdout, "", log.LstdFlags)
 
 	pool, err := db.Open(ctx, cfg.DatabaseURL(), db.Options{Logger: logger})
 	if err != nil {
@@ -64,7 +61,7 @@ func main() {
 		fatal(logger, "seed", err)
 	}
 
-	app := newApp(cfg, pool, logger, legacy)
+	app := newApp(cfg, pool, logger)
 	app.logStartup()
 	if err := app.retrainAll(ctx); err != nil {
 		fatal(logger, "retrain", err)
@@ -112,15 +109,12 @@ type app struct {
 	notify  *telegram.Notifier
 	digest  *digest.Runner
 	logger  *slog.Logger
-	// legacy is the pre-migration *log.Logger still expected by packages that have
-	// not moved to slog yet. It disappears when they do.
-	legacy *log.Logger
 
 	// pollerWG tracks the Telegram poller so shutdown can wait for it.
 	pollerWG sync.WaitGroup
 }
 
-func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger, legacy *log.Logger) *app {
+func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) *app {
 	fetcher := fetch.New(cfg)
 	notifier := telegram.New(cfg, imageDownloader{fc: fetcher}, os.Stdout)
 	repository := repo.New(pool)
@@ -137,7 +131,6 @@ func newApp(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger, legacy 
 			MaxPerRun: cfg.MaxDaily,
 		},
 		logger: logger,
-		legacy: legacy,
 	}
 }
 
@@ -200,7 +193,7 @@ func (a *app) startPoller(ctx context.Context) {
 		API:    a.notify,
 		Logger: a.logger,
 		Contacts: &contact.Extractor{
-			Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.legacy,
+			Repo: a.repo, Fetcher: a.fetcher, Notifier: a.notify, Logger: a.logger,
 		},
 		Holder: pollerHolder(),
 	}

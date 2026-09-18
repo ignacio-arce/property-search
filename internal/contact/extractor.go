@@ -5,7 +5,7 @@ package contact
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -29,7 +29,7 @@ type Extractor struct {
 	Repo     *repo.Repo
 	Fetcher  Fetcher
 	Notifier Notifier
-	Logger   *log.Logger
+	Logger   *slog.Logger
 	// Now is overridable for tests.
 	Now func() time.Time
 }
@@ -53,13 +53,13 @@ func (e *Extractor) OnLike(ctx context.Context, userID, chatID, listingID int64)
 		if err != nil {
 			// A failed detail fetch must not leave the user with less than before:
 			// the link is already on the card.
-			e.logf("contact: listing %d: %v", listingID, err)
+			e.Logger.Warn("contact: detail fetch failed", "listing", listingID, "err", err)
 			return nil
 		}
 	}
 
 	if details.Phone == "" {
-		e.logf("contact: listing %d has no phone in its detail page", listingID)
+		e.Logger.Debug("contact: listing has no phone in its detail page", "listing", listingID)
 		return nil
 	}
 
@@ -68,6 +68,7 @@ func (e *Extractor) OnLike(ctx context.Context, userID, chatID, listingID int64)
 		lines = append(lines, "Dirección: "+details.StreetAddress)
 	}
 	lines = append(lines, "Mencioná que lo viste en Zonaprop.")
+	e.Logger.Info("contact: phone sent", "user", userID, "listing", listingID)
 	return e.Notifier.SendText(ctx, fmt.Sprintf("%d", chatID), strings.Join(lines, "\n"))
 }
 
@@ -94,10 +95,4 @@ func (e *Extractor) fetchContact(ctx context.Context, listingID int64) (model.Co
 		return model.Contact{}, err
 	}
 	return details, nil
-}
-
-func (e *Extractor) logf(format string, args ...any) {
-	if e.Logger != nil {
-		e.Logger.Printf(format, args...)
-	}
 }
